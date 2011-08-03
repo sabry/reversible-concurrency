@@ -1,0 +1,14 @@
+the_example.hs contains all the code to run the one example listed in
+the proposal that tests all the features in the model so far. That is,
+it contains the example from section 2 of the proposal, and does run it,
+though incorrectly.
+
+The other files incrementally build up the model, in the same order as
+the proposal.
+
+I have a feeling my scheduler is not implemented in the best way, but it
+does seem to work on the first couple models. It fails slightly in the
+final example, and I while understand how it's failing, I don't
+understand enough to fix it.
+
+William Bowman
