@@ -1,53 +1,65 @@
-import Control.Concurrent
+import Control.Concurrent hiding (yield)
+import qualified Control.Concurrent as CC (yield)
 import Control.Monad.Trans.List
 import Control.Exception
 import Control.Monad.Reader 
+import Debug.Trace
 
-type Proc r a = ReaderT (MVar [r], MVar [MVar ()]) IO a
+data Action r = Res r |
+                Susp (() -> Action r) |
+                Par (Action r) (Action r)
 
-wrapProc :: Proc r r -> MVar () -> Proc r () 
-wrapProc p mvar =
-  do st <- ask
-     res <- liftIO $ runReaderT p st
-     xs <- liftIO $ takeMVar $ fst st
-     liftIO $ putMVar (fst st) (res : xs)
-     liftIO $ putMVar mvar ()
-
-forkChild :: (MVar () -> Proc r ()) -> Proc r ThreadId
-forkChild exp = do st <- ask
-                   mvar <- liftIO $ newEmptyMVar 
-                   liftIO $ modifyMVar_ (snd st) (\xs -> return (mvar:xs))
-                   liftIO $ forkIO $ runReaderT (exp mvar) st
+type Proc r a = ReaderT (MVar [r]) (ListT IO) a
 
 waitForChildren :: MVar [MVar ()] -> IO ()
 waitForChildren children = do
-  cs <- takeMVar children
-  case cs of
-    []   -> return ()
-    m:ms -> do
-       putMVar children ms
-       takeMVar m
-       waitForChildren children
+  xs <- takeMVar children
+  case xs of
+       [] -> return ()
+       (x:xs) -> do
+          putMVar children xs
+          takeMVar x
+          waitForChildren children
 
-par :: Proc r a -> Proc r a -> Proc r a
-par c1 c2 = 
-  -- Run the expressions in the background, giving them the mvar to
-  -- store their results in
-  do children <- liftIO $ newMVar []
-     local (\st -> (fst st, children)) $ forkChild $ wrapProc c1
-     local (\st -> (fst st, children)) $ forkChild $ wrapProc c2
-     --Ensure we switched to one of the new threads
-     liftIO $ yield
-     -- Wait for them to complete, then clear the children list, and
-     -- return the childrens results
-     liftIO $ waitForChildren children
+forkChild :: MVar [MVar ()] -> (MVar () -> IO ()) -> Proc r ThreadId
+forkChild children io = do
+  block <- liftIO $ newEmptyMVar
+  liftIO $ modifyMVar_ children (\xs -> return (block:xs)) 
+  liftIO . forkIO $ io block
 
-f_return :: a -> Proc r a
-f_return e = liftIO $ return e
+wrapProc :: Show r => Proc r r -> Proc r (MVar () -> IO ())
+wrapProc p = do
+  mres <- ask
+  return $ \block -> do 
+    res <- runProc p 
+    modifyMVar_ mres (\mres -> return (res ++ mres))
+    putMVar block ()
 
-f_yield = liftIO $ yield
 
-test1 = (par (f_return 1) (f_return 2))
-test2 = (par (do f_yield; (par (f_return 1) (f_return 2)))
-             (f_return 3))
+par :: Show r => Proc r r -> Proc r r -> Proc r r
+par p1 p2 = do 
+  children <- liftIO . newMVar $ []
+  io1 <- wrapProc p1
+  io2 <- wrapProc p2
+  forkChild children $ io1 
+  forkChild children $ io2 
+  liftIO $ waitForChildren children
+  -- Well, since the state has been updated, what do we return? The
+  -- return doesn't matter much so...
+  p2
 
+runProc :: Proc r r -> IO [r]
+runProc p = do
+  mvar <- liftIO $ newMVar []
+  runListT $ runReaderT p mvar
+  takeMVar mvar
+
+
+yield :: Proc r ()
+yield = liftIO $ CC.yield 
+
+test1 :: Num r => Proc r r
+test1 = (par (return 1) (return 2))
+test2 :: Num r => Proc r r
+test2 = (par (do yield; (par (return 1) (return 2)))
+             (return 3))
