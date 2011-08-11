@@ -1,10 +1,11 @@
-import Control.Monad.State
+import Control.Monad.Reader
+import Control.Concurrent.Chan
+import Control.Concurrent hiding (yield)
 import Control.Monad.Cont
+import qualified Control.Concurrent as CC (yield)
+import Debug.Trace
 
-
-type Chan = [Int]
-
-type Comp a = State Chan a
+type Comp a = Reader (Chan Int) a
 
 data Action r = Res r
               | Susp (() -> Comp (Action r))
@@ -12,14 +13,14 @@ data Action r = Res r
 
 type Proc r a = Cont (Comp (Action r)) a
 
-yield :: Proc r ()
-yield = Cont (\k -> return (Susp k))
-
 par :: Proc r a -> Proc r a -> Proc r a
-par (Cont c1) (Cont c2) = Cont (\k -> return (Par (c1 k) (c2 k)))
+par (Cont c1) (Cont c2) = Cont (\k -> Par (c1 k) (c2 k))
+
+yield :: Proc r ()
+yield = Cont (\k -> (Susp k))
 
 send :: Int -> Proc r ()
-send s = Cont (\k -> do ch <- get
+send s = Cont (\k -> do ch <- ask
                         put (ch ++ [s])
                         k ())
 
@@ -29,23 +30,51 @@ recv = Cont (\k -> do ch <- get
                         [] -> runCont (do yield; recv) k
                         (s:ss) -> do put ss; k s)
 
+wrapProc :: Show r => IO [r] -> MVar () -> MVar [r] -> IO ()
+wrapProc p block mvar = do
+  xs <- p
+  return $ trace (show xs) ()
+  modifyMVar_ mvar (\ls -> return $ xs ++ ls)
+  putMVar block ()
 
-processAction :: Action r -> [Comp (Action r)] -> Chan -> [r]
-processAction (Res res) xs ch = [res] ++ processNextC xs [] ch
-processAction (Susp a) xs ch = processNextC xs [(a ())] ch
-processAction (Par a1 a2) xs ch = processComp a1 (a2:xs) ch
+forkChild :: MVar [r] -> MVar [MVar ()] -> 
+            (MVar () -> MVar [r] -> IO ()) -> IO ThreadId
+forkChild results children io = do
+  block <- newEmptyMVar 
+  modifyMVar_ children (\xs -> return (block:xs))
+  forkIO $ io block results
 
-processNextC :: [Comp (Action r)] -> [Comp (Action r)] -> Chan -> [r]
-processNextC [] [] ch = []
-processNextC [] (x:xs) ch = processComp x xs ch
-processNextC (x:xs) xs' ch = processComp x (xs++xs') ch
+waitOnChildren :: MVar [MVar ()] -> IO ()
+waitOnChildren children = do
+  childs <- takeMVar children
+  case childs of
+       [] -> return ()
+       (x:xs) -> do
+        putMVar children xs
+        takeMVar x
+        waitOnChildren children
 
-processComp :: Comp (Action r) -> [Comp (Action r)] -> Chan -> [r]
-processComp s xs ch = (case (runState s ch) of
-                     (a,s) -> processAction a xs s)
+runPar :: Show r => Action r -> Action r -> IO [r]
+runPar k1 k2 = do
+  children <- newMVar []
+  results <- newMVar []
+  forkChild results children $ wrapProc (sched k1)
+  forkChild results children $ wrapProc (sched k2)
+  -- Block until all children have returned
+  waitOnChildren children
+  res <- takeMVar results
+  return res
 
-runProc :: Proc r r -> [r]
-runProc c = processComp (runCont c (\i -> return (Res i))) [] []
+sched :: Show r => Action r -> IO [r]
+sched x = 
+  case x of 
+       (Res r) -> return [r]
+       (Susp k) -> do CC.yield; sched $ k ()
+       (Par k1 k2) -> runPar k1 k2
+
+runProc :: Show r => Proc r r -> IO [r]
+runProc p = sched $ runCont p (\r -> (Res r))
+
 
 test3 = (par
          (do send 2
