@@ -8,9 +8,9 @@ import Debug.Trace
 -- allow me to wrap final answers in a list. This further
 -- allows me to do other things more easily, and hopefully allows for
 -- easier abstraction later. 
-type Comp a = Reader (Chan Int) a
+type Comp a = ReaderT (Chan Int) a
 
-type Proc r a = Cont (ReaderT (Chan Int) IO [r]) a
+type Proc r a = Cont (Comp IO [r]) a
 
 par :: Show r => Proc r a -> Proc r a -> Proc r a
 par (Cont c1) (Cont c2) = Cont (\k ->
