@@ -1,3 +1,4 @@
+-- Not yet modified to use real concurrency
 import Control.Monad.State
 import Control.Monad.Cont
 
