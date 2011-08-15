@@ -5,13 +5,15 @@
 -- actually preferablly to test this without parallelism, instead
 -- allowing ghc to use it's internal scheduler for concurency.
 --
-import Control.Concurrent hiding (yield)
+import Control.Concurrent hiding (yield,newChan)
 import Control.Monad.Cont
 import qualified Control.Concurrent as CC (yield)
+import qualified Control.Concurrent as CC (newChan)
 import Control.Monad.Reader
 import Debug.Trace
 
-type Comp a = ReaderT (Chan Int) a
+type PID = Int
+type Comp a = ReaderT PID a
 
 -- I use the continuation monad here, not for concurrency, but to
 -- allow me to wrap final answers in a list, easing the collection of
@@ -21,9 +23,9 @@ type Proc r a = Cont (Comp IO [r]) a
 
 par :: Show r => Proc r a -> Proc r a -> Proc r a
 par (Cont c1) (Cont c2) = Cont (\k -> do
-  ch <- ask
-  let b1 = runReaderT (c1 k) ch
-  let b2 = runReaderT (c2 k) ch
+  ppid <- ask
+  let b1 = runReaderT (c1 k) (ppid+1)
+  let b2 = runReaderT (c2 k) (ppid+2)
   liftIO $ runPar b1 b2)
 
 -- Still useful in a concurrent environment, but useless in true
@@ -32,26 +34,29 @@ yield :: Proc r ()
 yield = Cont (\k -> do 
   liftIO CC.yield; k ())
 
-send :: Int -> Proc r ()
-send s = Cont (\k -> do 
-  ch <- ask
+newChan :: Proc r (Chan a)
+newChan = Cont (\k -> do ch <- liftIO CC.newChan; k ch)
+
+send :: Chan Int -> Int -> Proc r ()
+send ch s = Cont (\k -> do 
   liftIO $ writeChan ch s
   k ())
 
-recv :: Proc r Int
-recv = Cont (\k -> do 
-  ch <- ask
+recv :: Chan Int -> Proc r Int
+recv ch = Cont (\k -> do 
   -- Since we're using real threads, and the channel
   -- is blocking, I shouldn't need to manually yield
   -- here... right?
   i <- liftIO $ readChan ch
+  pid <- ask
+  trace ("PID: " ++ show pid ++ " Recv: " ++ (show i)) $ return ()
   k i)
 
 choose :: Proc r a -> Proc r a -> Proc r a
 choose (Cont c1) (Cont c2) = Cont (\k -> do 
-  ch <- ask
-  let b1 = runReaderT (c1 k) ch
-  let b2 = runReaderT (c2 k) ch
+  pid <- ask
+  let b1 = runReaderT (c1 k) pid
+  let b2 = runReaderT (c2 k) pid
   ls1 <- liftIO b1
   ls2 <- liftIO b2
   liftIO $ return $ ls1 ++ ls2)
@@ -62,9 +67,6 @@ backtrack = Cont (\k -> return [])
 wrapProc :: Show r => IO [r] -> MVar () -> MVar [r] -> IO ()
 wrapProc p block mvar = do
   xs <- p
-  -- I just realized, this debug message is never printed. Is that a
-  -- result of the lazyness?
-  return $ trace ("Debug: " ++ (show xs) ++ "\n") ()
   modifyMVar_ mvar (\ls -> return $ xs ++ ls)
   putMVar block ()
 
@@ -98,9 +100,7 @@ runPar k1 k2 = do
   takeMVar results
 
 runProc :: Show r => Proc r r -> IO [r]
-runProc p = do
-  ch <- newChan
-  runReaderT (runCont p (\r -> return [r])) ch
+runProc p = runReaderT (runCont p (\r -> return [r])) 0
 
 -- All the tests have data returned in an unexpected order. This make
 -- sense in some of the tests, as the parallelism is non-deterministic as
@@ -131,19 +131,21 @@ test2 = (par (do yield; (par (return 1) (return 2)))
 -- Expected: [0,3]
 -- Results: [3,0]
 test3 :: Proc Int Int
-test3 = (par
-         (do send 2
-             return 0)
-         (do x <- recv
-             return (x+1)))
+test3 = do ch <- newChan
+           (par
+              (do send ch 2
+                  return 0)
+              (do x <- recv ch
+                  return (x+1)))
 
 -- Expected: [1,0,11]
 -- Results: [11,1,0]
 test4 :: Proc Int Int
-test4 = (foldr1 par
-                  [do x <- recv; send (x+1); return 0,
-                   return 1,
-                   do send 10; yield; y <- recv; return y])
+test4 = do ch <- newChan
+           (foldr1 par
+                 [do x <- recv ch; send ch (x+1); return 0,
+                  return 1,
+                  do send ch 10; yield; y <- recv ch; return y])
 
 -- Expected: [10, 1]
 -- Results: [1,1,10] or [2,0]
@@ -160,15 +162,17 @@ test4 = (foldr1 par
 -- haven't figured out why we get two 1's. Maybe it's due to both
 -- duplicated continutations and true parallelism.
 test5 :: Proc Int Int
-test5 = par
-          (do x <- choose (return 1) (return 2)
-              send x
-              yield
-              y <- recv
-              if y == 0
-                then backtrack
-                else return y)
-          (do a <- recv
-              if a == 1
-                then do send 0; return 0
-                else do send 1; return 10)
+test5 = do ch1 <- newChan
+           ch2 <- newChan
+           par
+            (do x <- choose (return 1) (return 2)
+                send ch1 x
+                yield
+                y <- recv ch2
+                if y == 0
+                  then backtrack
+                  else return y)
+            (do a <- recv ch1
+                if a == 1
+                  then do send ch2 0; return 0
+                  else do send ch2 1; return 10)

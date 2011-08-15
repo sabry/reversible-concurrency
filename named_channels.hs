@@ -1,142 +1,169 @@
--- Not yet modified to use real concurrency
-import Control.Monad.State
-import Control.Monad.Cont
+-- To run with true parallelism, use: ghci +RTS -N -RTS. Of course, you
+-- need a machine with at least 2 cores to take advantage of this.
 
-type Name = String
+import Control.Concurrent hiding (yield,newChan)
+import qualified Control.Concurrent as CC (yield)
+import qualified Control.Concurrent as CC (newChan)
+import Control.Monad.Reader
+import Debug.Trace
 
-type Chan = [Int]
+type PID = Int
+type Comp a = ReaderT PID a
 
-type NamedChan = (Name, Chan)
+-- I use the continuation monad here, not for concurrency, but to
+-- allow me to wrap final answers in a list, easing the collection of
+-- answers from all threads, and allowing nondeterminism to be added
+-- more easily.
+type Proc r = (Comp IO r)
 
--- Now the state is a list of named channels, rather than just a single
--- channel.
-type Comp a = StateT [NamedChan] [] a
+par :: Show r => Proc r -> Proc r -> Proc r
+par c1 c2  = do
+  let b1 = local (1+) c1
+  let b2 = local (2+) c2 
+  liftIO $ runPar b1 b2
 
-data Action r = Res r
-              | Susp (() -> Comp (Action r))
-              | Par (Comp (Action r)) (Comp (Action r))
+-- Still useful in a concurrent environment, but useless in true
+-- parallel environment. 
+yield :: Proc r
+yield = liftIO CC.yield
 
-type Proc r a = Cont (Comp (Action r)) a
+newChan :: Proc r
+newChan = liftIO CC.newChan
 
-yield :: Proc r ()
-yield = Cont (\k -> return (Susp k))
+send :: Chan Int -> Int -> Proc r 
+send ch s = liftIO $ writeChan ch s
 
-par :: Proc r a -> Proc r a -> Proc r a
-par (Cont c1) (Cont c2) = Cont (\k -> return (Par (c1 k) (c2 k)))
+recv :: Chan Int -> Proc r
+recv ch = do 
+  -- Since we're using real threads, and the channel
+  -- is blocking, I shouldn't need to manually yield
+  -- here... right?
+  i <- liftIO $ readChan ch
+  pid <- ask
+  trace ("PID: " ++ show pid ++ " Recv: " ++ (show i)) $ return ()
+  return i
 
--- Of course, one might actually want a function that generates a name
--- in a production settings, but this is a start.
--- Note we can easily have multiple channels with the same name, as we
--- do no such error checking. The result of this is undefined on both
--- send and recv, so don't do it.
-newchan :: String -> Proc r ()
-newchan s = Cont (\k -> do nchans <- get
-                           put $ (s, []) : nchans
-                           k ())
-
--- First we get the state: a list of named channels. Take advantage of
--- the list monad to figure out which channel has the correct name, and
--- return the entire modified state, with the message on the correct
--- channel.
-send :: String -> Int -> Proc r ()
-send name s = Cont (\k -> do nchans <- get
-                             put $ do nch <- nchans
-                                      case nch of
-                                           (n, ch) | n == name 
-                                             -> return (n, (ch ++ [s]))
-                                           x -> return x
-                             k ())
-
--- Overdocumented! Perhaps better than underdocumented
---
--- From the list monad, we return a zipped list of lists of ints, and
--- named channels, which have been modified during receiving. The type
--- then is: [([Int], NamedChan)]. However, all these pairs except the
--- one with the named channel we want will have an empty list with it.
--- With a little functional magic, we can easily reconstruct the value
--- we're looking for, and the modified list of named channels. 
---
--- It might have been simpler to just use an Int in the zip list, and
--- return 0, using sum to merge them, but a list is more
--- extensible.
---
--- It's not the prettiest Haskell code ever written, and I have a
--- feeling.. it's a little hacky. Namely this zip list, it seems like a
--- hack to export the result from far inside the monad, and using the
--- list to keep the type checker happy.
-recv :: String -> Proc r Int
-recv name = Cont (\k -> do nchans <- get
-                           let (xs, mnchans) = 
-                                -- unzip the zip list, and get rid of
-                                -- the extra nil lists.
-                                (\(xs, ms) -> 
-                                  ((foldl (++) [] xs), ms)) . unzip $
-                                 -- For each named channel...
-                                 do nch <- nchans
-                                    let rcv n ch =
-                                         case ch of 
-                                              [] -> ([], (n, []))
-                                              (s:ss) -> ([s], (n, ss))
-                                        -- If the name is correct, recv
-                                        -- the value, and modify the
-                                        -- channel. Otherwise, leave it
-                                        -- alone, and return an empty
-                                        -- list (for type checking)
-                                        in case nch of
-                                                (n, ch) | (n == name)
-                                                  -> return $ rcv n ch
-                                                x -> return ([], x)
-                               in case xs of
-                                       -- No value returned in the zip
-                                       -- list; channel was empty
-                                       [] -> runCont 
-                                              (do yield; recv name) 
-                                              k 
-                                       -- Otherwise, the only value
-                                       -- there is the one we want.
-                                       (x:_) -> do put mnchans; (k x))
-
-choose :: Proc r a -> Proc r a -> Proc r a
-choose (Cont c1) (Cont c2) =
-  Cont (\k -> StateT (\ch ->
-    let b1 = runStateT (c1 k) ch
-        b2 = runStateT (c2 k) ch
-    in b1 ++ b2))
+choose :: Proc r -> Proc r -> Proc r
+choose c1 c2 = do 
+  pid <- ask
+  let b1 = local runReaderT (c1 k) pid
+  let b2 = runReaderT (c2 k) pid
+  ls1 <- liftIO b1
+  ls2 <- liftIO b2
+  liftIO $ return $ ls1 ++ ls2)
 
 backtrack :: Proc r a
-backtrack = Cont (\k -> StateT (\ch -> []))
+backtrack = Cont (\k -> return [])
 
-runProc :: Proc r r -> [[r]]
-runProc c =  evalStateT (sched [runCont c (\i -> return (Res i))]) []
-  where sched [] = return []
-        sched (x : xs) = 
-          do a <- x
-             case a of 
-                  (Res r) -> do rs <- sched xs; return (r : rs)
-                  (Susp c) -> sched (xs ++ [c ()])
-                  (Par c1 c2) -> sched (xs ++ [c1,c2])
-test5 = par
-          (do x <- choose (return 1) (return 2)
-              newchan "a"
-              send "a" x
-              yield
-              y <- recv "b"
-              if y == 0
-                then backtrack
-                else return y)
-          (do a <- recv "a"
-              newchan "b"
-              if a == 1
-                then do send "b" 0; return 0
-                else do send "b" 1; return 10)
--- This should hang forever, since they're not using the correct
--- channels to communicate with each other.
-test6 = par
-          (do newchan "a"
-              send "a" 1
-              yield
-              y <- recv "c"
-              return y)
-          (do x <- recv "c"
-              return x)
+wrapProc :: Show r => IO [r] -> MVar () -> MVar [r] -> IO ()
+wrapProc p block mvar = do
+  xs <- p
+  modifyMVar_ mvar (\ls -> return $ xs ++ ls)
+  putMVar block ()
 
+forkChild :: MVar [r] -> MVar [MVar ()] -> 
+            (MVar () -> MVar [r] -> IO ()) -> IO ThreadId
+forkChild results children io = do
+  block <- newEmptyMVar 
+  modifyMVar_ children (\xs -> return $ block:xs)
+  forkIO $ io block results
+
+waitOnChildren :: MVar [MVar ()] -> IO ()
+waitOnChildren children = do
+  childs <- takeMVar children
+  case childs of
+    [] -> return ()
+    (x:xs) -> do
+    putMVar children xs
+    takeMVar x
+    waitOnChildren children
+
+runPar :: Show r => IO [r] -> IO [r] -> IO [r]
+runPar k1 k2 = do
+  children <- newMVar []
+  results <- newMVar []
+  -- We might cause some unintentional ordering by spawning one of these
+  -- first, as it gets a head start. But.. I think that's unavoidable.
+  forkChild results children $ wrapProc k1
+  forkChild results children $ wrapProc k2
+  -- Block until all children have returned
+  waitOnChildren children
+  takeMVar results
+
+runProc :: Show r => Proc r r -> IO [r]
+runProc p = runReaderT (runCont p (\r -> return [r])) 0
+
+-- All the tests have data returned in an unexpected order. This make
+-- sense in some of the tests, as the parallelism is non-deterministic as
+-- to which one will finish first. The tests with explicit yields,
+-- however, are slightly more interesting. While in a concurrent
+-- environment, without true parallelism, the yield would force one
+-- thread to wait, in a true parallel environment, with enough cores for
+-- all threads, the yield is useless. 
+--
+-- Unfortunately, this can cause a race condition in some of the
+-- assumptions we make, for instance, in test5. We assume that, having
+-- yielded, the second thread will receive the value we sent before we
+-- manage to receive. This might not be the case, however, if the first
+-- thread is running faster than the second thread.
+--
+--
+-- Expected: [1,2]
+-- Result: [2,1] or [1,2]
+test1 :: Proc Int Int
+test1 = (par (return 1) (return 2))
+
+-- Expected: [3,1,2]
+-- Results: [2,1,3]
+test2 :: Proc Int Int
+test2 = (par (do yield; (par (return 1) (return 2)))
+             (return 3))
+
+-- Expected: [0,3]
+-- Results: [3,0]
+test3 :: Proc Int Int
+test3 = do ch <- newChan
+           (par
+              (do send ch 2
+                  return 0)
+              (do x <- recv ch
+                  return (x+1)))
+
+-- Expected: [1,0,11]
+-- Results: [11,1,0]
+test4 :: Proc Int Int
+test4 = do ch <- newChan
+           (foldr1 par
+                 [do x <- recv ch; send ch (x+1); return 0,
+                  return 1,
+                  do send ch 10; yield; y <- recv ch; return y])
+
+-- Expected: [10, 1]
+-- Results: [1,1,10] or [2,0]
+--
+-- There's a race condition caused by the channel, it seems. We can
+-- occasionally pull off the x we sent before the other thread has had
+-- a chance to receive it, despite the yield. It's interesting that
+-- we're both able to pull the value off the channel simultaneously,
+-- however.
+--
+-- The only solution to this issue I can see is named channels.
+--
+-- What's more curious is the result we normally get, being [1,1,10]. I
+-- haven't figured out why we get two 1's. Maybe it's due to both
+-- duplicated continutations and true parallelism.
+test5 :: Proc Int Int
+test5 = do ch1 <- newChan
+           ch2 <- newChan
+           par
+            (do x <- choose (return 1) (return 2)
+                send ch1 x
+                yield
+                y <- recv ch2
+                if y == 0
+                  then backtrack
+                  else return y)
+            (do a <- recv ch1
+                if a == 1
+                  then do send ch2 0; return 0
+                  else do send ch2 1; return 10)
