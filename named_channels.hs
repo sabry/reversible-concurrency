@@ -14,30 +14,29 @@ type Comp a = ReaderT PID a
 -- allow me to wrap final answers in a list, easing the collection of
 -- answers from all threads, and allowing nondeterminism to be added
 -- more easily.
-type Proc r = (Comp IO r)
+type Proc r = (Comp IO [r])
 
 par :: Show r => Proc r -> Proc r -> Proc r
 par c1 c2  = do
-  let b1 = local (1+) c1
-  let b2 = local (2+) c2 
+  pid <- ask
+  let b1 = runReaderT c1 (1+pid)
+  let b2 = runReaderT c2 (2+pid)
   liftIO $ runPar b1 b2
+  
 
 -- Still useful in a concurrent environment, but useless in true
 -- parallel environment. 
-yield :: Proc r
+yield :: Proc ()
 yield = liftIO CC.yield
 
-newChan :: Proc r
+newChan :: Proc (Chan r)
 newChan = liftIO CC.newChan
 
-send :: Chan Int -> Int -> Proc r 
+send :: Chan Int -> Int -> Proc ()
 send ch s = liftIO $ writeChan ch s
 
-recv :: Chan Int -> Proc r
+recv :: Chan Int -> Proc Int
 recv ch = do 
-  -- Since we're using real threads, and the channel
-  -- is blocking, I shouldn't need to manually yield
-  -- here... right?
   i <- liftIO $ readChan ch
   pid <- ask
   trace ("PID: " ++ show pid ++ " Recv: " ++ (show i)) $ return ()
@@ -46,27 +45,25 @@ recv ch = do
 choose :: Proc r -> Proc r -> Proc r
 choose c1 c2 = do 
   pid <- ask
-  let b1 = local runReaderT (c1 k) pid
-  let b2 = runReaderT (c2 k) pid
-  ls1 <- liftIO b1
-  ls2 <- liftIO b2
-  liftIO $ return $ ls1 ++ ls2)
+  let b1 = runReaderT c1 pid
+  let b2 = runReaderT c2 pid
+  lift $ b1 `mplus` b2
 
-backtrack :: Proc r a
-backtrack = Cont (\k -> return [])
+backtrack :: Proc r
+backtrack = lift mzero
 
-wrapProc :: Show r => IO [r] -> MVar () -> MVar [r] -> IO ()
+wrapProc :: Show r => IO r -> MVar () -> MVar r -> IO ()
 wrapProc p block mvar = do
-  xs <- p
-  modifyMVar_ mvar (\ls -> return $ xs ++ ls)
+  res <- p
+  putMVar mvar res
   putMVar block ()
 
-forkChild :: MVar [r] -> MVar [MVar ()] -> 
-            (MVar () -> MVar [r] -> IO ()) -> IO ThreadId
-forkChild results children io = do
+forkChild :: MVar r -> MVar [MVar ()] -> 
+            (MVar () -> MVar r -> IO ()) -> IO ThreadId
+forkChild res children io = do
   block <- newEmptyMVar 
   modifyMVar_ children (\xs -> return $ block:xs)
-  forkIO $ io block results
+  forkIO $ io block res
 
 waitOnChildren :: MVar [MVar ()] -> IO ()
 waitOnChildren children = do
@@ -78,20 +75,22 @@ waitOnChildren children = do
     takeMVar x
     waitOnChildren children
 
-runPar :: Show r => IO [r] -> IO [r] -> IO [r]
+runPar :: Show r => ListT IO r -> ListT IO r -> ListT IO r
 runPar k1 k2 = do
-  children <- newMVar []
-  results <- newMVar []
+  children <- liftIO $ newMVar []
+  res1 <- liftIO $ newEmptyMVar
+  res2 <- liftIO $ newEmptyMVar
   -- We might cause some unintentional ordering by spawning one of these
   -- first, as it gets a head start. But.. I think that's unavoidable.
-  forkChild results children $ wrapProc k1
-  forkChild results children $ wrapProc k2
+  liftIO $ forkChild res1 children $ wrapProc k1
+  liftIO $ forkChild res2 children $ wrapProc k2
   -- Block until all children have returned
-  waitOnChildren children
-  takeMVar results
+  liftIO $ waitOnChildren children
+  mplus (liftIO $ takeMVar res1) (liftIO $ takeMVar res2)
 
-runProc :: Show r => Proc r r -> IO [r]
-runProc p = runReaderT (runCont p (\r -> return [r])) 0
+
+runProc :: Show r => Proc r -> IO [r]
+runProc p = runListT $ runReaderT p 0
 
 -- All the tests have data returned in an unexpected order. This make
 -- sense in some of the tests, as the parallelism is non-deterministic as
@@ -110,18 +109,19 @@ runProc p = runReaderT (runCont p (\r -> return [r])) 0
 --
 -- Expected: [1,2]
 -- Result: [2,1] or [1,2]
-test1 :: Proc Int Int
+test1 :: Proc ()
 test1 = (par (return 1) (return 2))
+
 
 -- Expected: [3,1,2]
 -- Results: [2,1,3]
-test2 :: Proc Int Int
+--test2 :: Proc ()
 test2 = (par (do yield; (par (return 1) (return 2)))
              (return 3))
 
 -- Expected: [0,3]
 -- Results: [3,0]
-test3 :: Proc Int Int
+test3 :: Proc ()
 test3 = do ch <- newChan
            (par
               (do send ch 2
@@ -131,7 +131,7 @@ test3 = do ch <- newChan
 
 -- Expected: [1,0,11]
 -- Results: [11,1,0]
-test4 :: Proc Int Int
+test4 :: Proc ()
 test4 = do ch <- newChan
            (foldr1 par
                  [do x <- recv ch; send ch (x+1); return 0,
@@ -152,7 +152,7 @@ test4 = do ch <- newChan
 -- What's more curious is the result we normally get, being [1,1,10]. I
 -- haven't figured out why we get two 1's. Maybe it's due to both
 -- duplicated continutations and true parallelism.
-test5 :: Proc Int Int
+test5 :: Proc () 
 test5 = do ch1 <- newChan
            ch2 <- newChan
            par
@@ -167,3 +167,4 @@ test5 = do ch1 <- newChan
                 if a == 1
                   then do send ch2 0; return 0
                   else do send ch2 1; return 10)
+

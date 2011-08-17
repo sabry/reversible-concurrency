@@ -1,10 +1,6 @@
 -- To run with true parallelism, use: ghci +RTS -N -RTS. Of course, you
 -- need a machine with at least 2 cores to take advantage of this.
 
--- However, due to some race conditions which exist right now, it's
--- actually preferablly to test this without parallelism, instead
--- allowing ghc to use it's internal scheduler for concurency.
---
 import Control.Concurrent hiding (yield,newChan)
 import Control.Monad.Cont
 import qualified Control.Concurrent as CC (yield)
@@ -39,14 +35,13 @@ newChan = Cont (\k -> do ch <- liftIO CC.newChan; k ch)
 
 send :: Chan Int -> Int -> Proc r ()
 send ch s = Cont (\k -> do 
+  pid <- ask
+  liftIO $ putStrLn ("PID: " ++ (show pid) ++ " Sending: " ++ (show s))
   liftIO $ writeChan ch s
   k ())
 
 recv :: Chan Int -> Proc r Int
 recv ch = Cont (\k -> do 
-  -- Since we're using real threads, and the channel
-  -- is blocking, I shouldn't need to manually yield
-  -- here... right?
   i <- liftIO $ readChan ch
   pid <- ask
   trace ("PID: " ++ show pid ++ " Recv: " ++ (show i)) $ return ()
@@ -62,7 +57,7 @@ choose (Cont c1) (Cont c2) = Cont (\k -> do
   liftIO $ return $ ls1 ++ ls2)
 
 backtrack :: Proc r a
-backtrack = Cont (\k -> return [])
+backtrack = Cont (\k -> liftIO $ return [])
 
 wrapProc :: Show r => IO [r] -> MVar () -> MVar [r] -> IO ()
 wrapProc p block mvar = do
@@ -110,13 +105,6 @@ runProc p = runReaderT (runCont p (\r -> return [r])) 0
 -- thread to wait, in a true parallel environment, with enough cores for
 -- all threads, the yield is useless. 
 --
--- Unfortunately, this can cause a race condition in some of the
--- assumptions we make, for instance, in test5. We assume that, having
--- yielded, the second thread will receive the value we sent before we
--- manage to receive. This might not be the case, however, if the first
--- thread is running faster than the second thread.
---
---
 -- Expected: [1,2]
 -- Result: [2,1] or [1,2]
 test1 :: Proc Int Int
@@ -129,7 +117,7 @@ test2 = (par (do yield; (par (return 1) (return 2)))
              (return 3))
 
 -- Expected: [0,3]
--- Results: [3,0]
+-- Results: [0,3]
 test3 :: Proc Int Int
 test3 = do ch <- newChan
            (par
@@ -139,7 +127,7 @@ test3 = do ch <- newChan
                   return (x+1)))
 
 -- Expected: [1,0,11]
--- Results: [11,1,0]
+-- Results: [0,1,11]
 test4 :: Proc Int Int
 test4 = do ch <- newChan
            (foldr1 par
@@ -148,19 +136,10 @@ test4 = do ch <- newChan
                   do send ch 10; yield; y <- recv ch; return y])
 
 -- Expected: [10, 1]
--- Results: [1,1,10] or [2,0]
+-- Results: diverge
 --
--- There's a race condition caused by the channel, it seems. We can
--- occasionally pull off the x we sent before the other thread has had
--- a chance to receive it, despite the yield. It's interesting that
--- we're both able to pull the value off the channel simultaneously,
--- however.
---
--- The only solution to this issue I can see is named channels.
---
--- What's more curious is the result we normally get, being [1,1,10]. I
--- haven't figured out why we get two 1's. Maybe it's due to both
--- duplicated continutations and true parallelism.
+-- It seems after backtracking, this waits forever in the second
+-- process.
 test5 :: Proc Int Int
 test5 = do ch1 <- newChan
            ch2 <- newChan
