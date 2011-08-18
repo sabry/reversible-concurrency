@@ -50,7 +50,7 @@ choose c1 c2 = do
   let b2 = runReaderT (c2 k) pid
   ls1 <- liftIO b1
   ls2 <- liftIO b2
-  liftIO $ return $ ls1 ++ ls2)
+  liftIO $ return $ ls1 ++ ls2
 
 backtrack :: Proc r a
 backtrack = Cont (\k -> return [])

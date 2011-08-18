@@ -39,6 +39,8 @@ newChan = Cont (\k -> do ch <- liftIO CC.newChan; k ch)
 
 send :: Chan Int -> Int -> Proc r ()
 send ch s = Cont (\k -> do 
+  pid <- ask
+  liftIO $ putStrLn ("PID: " ++ (show pid) ++ " Sending: " ++ (show s))
   liftIO $ writeChan ch s
   k ())
 
@@ -55,18 +57,20 @@ recv ch = Cont (\k -> do
 choose :: Proc r a -> Proc r a -> Proc r a
 choose (Cont c1) (Cont c2) = Cont (\k -> do 
   pid <- ask
-  let b1 = runReaderT (c1 k) pid
-  let b2 = runReaderT (c2 k) pid
-  ls1 <- liftIO b1
-  ls2 <- liftIO b2
-  liftIO $ return $ ls1 ++ ls2)
+  b1 <- liftIO $ runReaderT (c1 k) pid
+  b2 <- liftIO $ runReaderT (c2 k) pid
+  liftIO $ return $ b1 ++ b2)
 
 backtrack :: Proc r a
-backtrack = Cont (\k -> return [])
+backtrack = Cont (\k -> do
+  pid <- ask
+  liftIO $ putStrLn ("PID: " ++ (show pid) ++ " backtracking..")
+  liftIO $ return [])
 
 wrapProc :: Show r => IO [r] -> MVar () -> MVar [r] -> IO ()
 wrapProc p block mvar = do
   xs <- p
+--  putStrLn ("Returning: " ++ (show xs))
   modifyMVar_ mvar (\ls -> return $ xs ++ ls)
   putMVar block ()
 
@@ -129,7 +133,7 @@ test2 = (par (do yield; (par (return 1) (return 2)))
              (return 3))
 
 -- Expected: [0,3]
--- Results: [3,0]
+-- Results: [0,3]
 test3 :: Proc Int Int
 test3 = do ch <- newChan
            (par
@@ -139,7 +143,7 @@ test3 = do ch <- newChan
                   return (x+1)))
 
 -- Expected: [1,0,11]
--- Results: [11,1,0]
+-- Results: [0,11,1]
 test4 :: Proc Int Int
 test4 = do ch <- newChan
            (foldr1 par
