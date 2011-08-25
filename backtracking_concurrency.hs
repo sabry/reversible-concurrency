@@ -9,11 +9,57 @@ import Control.Concurrent hiding (yield,newChan)
 import Control.Monad.Cont
 import qualified Control.Concurrent as CC (yield)
 import qualified Control.Concurrent as CC (newChan)
-import Control.Monad.Reader
+import Control.Monad.State
 import Debug.Trace
+import qualified Data.Map as Map
 
-type PID = Int
-type Comp a = ReaderT PID a
+-- Honestly, there's no Data.Stack?
+-- Quick stack implementation
+type Stack a = [a]
+empty :: Stack a
+empty = []
+isEmpty :: Stack a -> Bool
+isEmpty = null
+push :: a -> Stack a -> Stack a
+push = (:)
+top :: Stack a -> a
+top = head
+pop :: Stack a -> (a,Stack a)
+pop (s:ss) = (s,ss)
+
+
+type PID = Int -- ID of a process
+-- Speculative tag lets us know if something is involved in a
+-- speculative computation or not, i.e., if it appears between a choose
+-- and backtrack.
+type SpecTag = Bool
+-- XXX: This probably needs Chan Msg
+type Ch = (Chan Int, SpecTag)
+
+-- KType indicates the type of a continuation, which is needed to figure
+-- out what to do when backtracking
+-- XXX: This probably needs Msg instead of Int
+data KType = Sent Ch Int
+           | Recv Ch Int
+           | Choose
+
+-- Messages that can be sent over the channels.
+-- 1) A send message, the normal kind of message where you send data.
+-- 2) Unsend message, telling a thread to pretend it never received a
+--    a message on this channel. XXX: I think this needs more info, like
+--    a message ID.
+-- 3) Backtrack message, telling a thread to pop a continuation.
+-- 4) Continue, tells the thread to run the current continuation.
+data Msg = Send Int
+         | Unsend Int
+         | Backtrack
+         | Continue
+
+-- Each thread needs to keep track of various information, including if
+-- it's speculative, a stack of continuations, and a list of speculative
+-- channels.
+type ThreadMap r a = Map PID (SpecTag, Stack ((Proc r a), KType), [Ch])
+type Comp r a = StateT (PID, ThreadMap r a) a
 
 -- I use the continuation monad here, not for concurrency, but to
 -- allow me to wrap final answers in a list, easing the collection of
@@ -21,11 +67,38 @@ type Comp a = ReaderT PID a
 -- more easily.
 type Proc r a = Cont (Comp IO [r]) a
 
+-- Some interface methods
+getPID :: Proc r PID
+getPID = fmap fst get
+
+getThreadMap :: Proc r (ThreadMap r a)
+getThreadMap = fmap get snd
+
+-- _getThreadMapVal :: Proc r (...)
+-- Get the value portion of the map, given it's key.
+_getThreadMapVal pid = fmap getThreadMap (! pid)
+
+-- Given a function similar to fst or snd, over a triple, return that
+-- function called on the ThreadMap value.
+--_getFThreadMapVal :: PID -> ?
+_getFThreadMapVal f = fmap _getThreadMapVal f
+
+getSpecTag :: Proc r SpecTag
+getSpecTag pid = fmap (_getThreadMapVal pid) \(x,_,_) -> x
+
+getStack pid = fmap (_getThreadMapVal pid) \(_,x,_) -> x
+
+getSpecChans :: Proc r [Ch]
+getSpecChans pid = fmap (_getThreadMapVal pid) \(_,_,x) -> x
+
+-- end of interface
+
 par :: Show r => Proc r a -> Proc r a -> Proc r a
 par (Cont c1) (Cont c2) = Cont (\k -> do
-  ppid <- ask
-  let b1 = runReaderT (c1 k) (ppid+1)
-  let b2 = runReaderT (c2 k) (ppid+2)
+  ppid <- getPID
+  map <- getThreadMap
+  let b1 = runStateT (c1 k) (ppid+1, map)
+  let b2 = runStateT (c2 k) (ppid+2, map)
   liftIO $ runPar b1 b2)
 
 -- Still useful in a concurrent environment, but useless in true
@@ -37,33 +110,51 @@ yield = Cont (\k -> do
 newChan :: Proc r (Chan a)
 newChan = Cont (\k -> do ch <- liftIO CC.newChan; k ch)
 
+-- <s>TODO</s>: Need to alter so that, when we send on a channel, if the
+-- current thread is speculative, we mark the channel as speculative. We
+-- must also push a properly tagged continuation onto the stack.
 send :: Chan Int -> Int -> Proc r ()
-send ch s = Cont (\k -> do 
-  pid <- ask
+send ch s = callCC $ \cc -> Cont (\k -> do 
+  pushMyKStack cc
+  specTag <- getMySpecTag
+  pid <- getPID
+  if specTag 
+    then setSpecChan ch
+    else nothing
   liftIO $ putStrLn ("PID: " ++ (show pid) ++ " Sending: " ++ (show s))
   liftIO $ writeChan ch s
-  k ())
+  k ());
+  
 
+-- <s>TODO</s>: Same as send.
 recv :: Chan Int -> Proc r Int
-recv ch = Cont (\k -> do 
-  -- Since we're using real threads, and the channel
-  -- is blocking, I shouldn't need to manually yield
-  -- here... right?
+recv ch = callCC $ \cc -> Cont (\k -> do 
+  pushMyKStack cc 
   i <- liftIO $ readChan ch
-  pid <- ask
+  pid <- getPID
   trace ("PID: " ++ show pid ++ " Recv: " ++ (show i)) $ return ()
   k i)
 
+-- <s>TODO</s>: We need to mark the current thread a speculative, and push a
+-- Choose continuation onto the stack for this thread.
 choose :: Proc r a -> Proc r a -> Proc r a
 choose (Cont c1) (Cont c2) = Cont (\k -> do 
-  pid <- ask
-  b1 <- liftIO $ runReaderT (c1 k) pid
-  b2 <- liftIO $ runReaderT (c2 k) pid
+  setSpecTag
+  st <- get
+  b1 <- liftIO $ runStateT (c1 k) st
+  b2 <- liftIO $ runStateT (c2 k) st
   liftIO $ return $ b1 ++ b2)
 
+-- TODO: When we reach a backtrack, we need to send a message out on all
+-- speculative channels telling them to backtrack. They should
+-- immediately pop a continuation, and wait for more messages.
+--
+-- This thread should begin poping continuation, sending unsend and
+-- unrecv messages, until it reaches a choose statement. At the choose
+-- statement, it should send a Continue message
 backtrack :: Proc r a
 backtrack = Cont (\k -> do
-  pid <- ask
+  pid <- getPID
   liftIO $ putStrLn ("PID: " ++ (show pid) ++ " backtracking..")
   liftIO $ return [])
 
