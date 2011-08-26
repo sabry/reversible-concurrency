@@ -50,22 +50,29 @@ data KType = Sent Ch Int
 --    a message ID.
 -- 3) Backtrack message, telling a thread to pop a continuation.
 -- 4) Continue, tells the thread to run the current continuation.
-data Msg = Send Int
-         | Unsend Int
+-- 5) Complete tells the thread whichever thread caused the speculation
+--    has returned successfully, so it can stop listening for a
+--    backtrack message.
+data Msg = Send SpecTag MsgId Int
+         | Acknowledge SpecTag MsgId
+         | Unsend MsgId
+         | Unrecv MsgId
          | Backtrack
          | Continue
+         | Complete Chan
 
 -- Each thread needs to keep track of various information, including if
--- it's speculative, a stack of continuations, and a list of speculative
--- channels.
-type ThreadMap r a = Map PID (SpecTag, Stack ((Proc r a), KType), [Ch])
+-- it's speculative, a stack of continuations, and a list of channels it
+-- has received speculative information on, and a list it has sent
+-- speculative information on.
+type ThreadMap r a = Map PID (SpecTag, Stack ((Proc r a), KType), [Ch], [Ch])
 type Comp r a = StateT (PID, ThreadMap r a) a
 
 -- I use the continuation monad here, not for concurrency, but to
 -- allow me to wrap final answers in a list, easing the collection of
 -- answers from all threads, and allowing nondeterminism to be added
 -- more easily.
-type Proc r a = Cont (Comp IO [r]) a
+type Proc r a = Cont (Comp r IO [r]) a
 
 -- Some interface methods
 getPID :: Proc r PID
@@ -115,35 +122,42 @@ newChan = Cont (\k -> do ch <- liftIO CC.newChan; k ch)
 -- must also push a properly tagged continuation onto the stack.
 send :: Chan Int -> Int -> Proc r ()
 send ch s = callCC $ \cc -> Cont (\k -> do 
-  pushMyKStack cc
-  specTag <- getMySpecTag
   pid <- getPID
-  if specTag 
-    then setSpecChan ch
-    else nothing
+  msgid <- getMsgId ch
+  pushKStack pid cc
+  specTag <- getSpecTag pid
   liftIO $ putStrLn ("PID: " ++ (show pid) ++ " Sending: " ++ (show s))
-  liftIO $ writeChan ch s
+  liftIO $ writeChan ch $ Send specTag msgid s
+  if specTag
+    then addSpecSendCh pid ch
+    else nothing
   k ());
   
 
 -- <s>TODO</s>: Same as send.
 recv :: Chan Int -> Proc r Int
 recv ch = callCC $ \cc -> Cont (\k -> do 
-  pushMyKStack cc 
-  i <- liftIO $ readChan ch
   pid <- getPID
+  pushKStack pid cc 
+  (Send spec i) <- liftIO $ readChan ch
+  if spec
+    then addSpecRecvCh pid ch
+    else nothing
   trace ("PID: " ++ show pid ++ " Recv: " ++ (show i)) $ return ()
   k i)
 
 -- <s>TODO</s>: We need to mark the current thread a speculative, and push a
 -- Choose continuation onto the stack for this thread.
 choose :: Proc r a -> Proc r a -> Proc r a
-choose (Cont c1) (Cont c2) = Cont (\k -> do 
-  setSpecTag
+choose (Cont c1) (Cont c2) = callCC $ \cc -> Cont (\k -> do 
+  pid <- getPID
+  -- TODO: Need way to remember last choose, so we can get to next
+  -- choose. Perhaps a function which takes c1 and c2 and chooses one?
+  pushKStack pid cc
+  setSpecTag pid
   st <- get
   b1 <- liftIO $ runStateT (c1 k) st
-  b2 <- liftIO $ runStateT (c2 k) st
-  liftIO $ return $ b1 ++ b2)
+  liftIO $ return b1)
 
 -- TODO: When we reach a backtrack, we need to send a message out on all
 -- speculative channels telling them to backtrack. They should
