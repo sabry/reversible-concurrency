@@ -1,14 +1,17 @@
+-- I've taken up not deleting TODO and XXX tags, as they might be useful as
+-- notes if/when I have to write about this. Instead, completed ones are
+-- surrounded by HTML strike tags (<s></s>) 
+--
 -- To run with true parallelism, use: ghci +RTS -N -RTS. Of course, you
 -- need a machine with at least 2 cores to take advantage of this.
 
--- However, due to some race conditions which exist right now, it's
+-- <s>However, due to some race conditions which exist right now, it's
 -- actually preferablly to test this without parallelism, instead
--- allowing ghc to use it's internal scheduler for concurency.
+-- allowing ghc to use it's internal scheduler for concurency.</s>
 --
 import Control.Concurrent hiding (yield,newChan)
 import Control.Monad.Cont
-import qualified Control.Concurrent as CC (yield)
-import qualified Control.Concurrent as CC (newChan)
+import qualified Control.Concurrent as CC (yield,newChan)
 import Control.Monad.State
 import Debug.Trace
 import qualified Data.Map as Map
@@ -27,54 +30,77 @@ top = head
 pop :: Stack a -> (a,Stack a)
 pop (s:ss) = (s,ss)
 
+-- end stack implementation
 
-type PID = Int -- ID of a process
+type Pid = Int -- ID of a process
+type MsgId = Int -- ID for a message on a channel.
+type ChId = Int -- Take a wild guess.
+
 -- Speculative tag lets us know if something is involved in a
 -- speculative computation or not, i.e., if it appears between a choose
 -- and backtrack.
 type SpecTag = Bool
--- XXX: This probably needs Chan Msg
-type Ch = (Chan Int, SpecTag)
+type Ch = (Chan Msg, Chan Msg, SpecTag, MsgId)
 
 -- KType indicates the type of a continuation, which is needed to figure
 -- out what to do when backtracking
--- XXX: This probably needs Msg instead of Int
-data KType = Sent Ch Int
-           | Recv Ch Int
+data KType = Sent ChId MsgId
+           | Recv ChId MsgId
            | Choose
 
 -- Messages that can be sent over the channels.
 -- 1) A send message, the normal kind of message where you send data.
 -- 2) Unsend message, telling a thread to pretend it never received a
---    a message on this channel. XXX: I think this needs more info, like
---    a message ID.
+--    a message on this channel. 
 -- 3) Backtrack message, telling a thread to pop a continuation.
 -- 4) Continue, tells the thread to run the current continuation.
 -- 5) Complete tells the thread whichever thread caused the speculation
 --    has returned successfully, so it can stop listening for a
 --    backtrack message.
+-- 6) Acknowledge, which is used for by a receiving thread to
+--    the message, and let the sending thread know if it's speculative.
+--    Send and acknowledge message ID's should be the same.
+-- 7) Unreceive might not be totally necessary, if the sending threads
+--    can keep track of sending to speculative threads. We'll see.
 data Msg = Send SpecTag MsgId Int
          | Acknowledge SpecTag MsgId
          | Unsend MsgId
          | Unrecv MsgId
          | Backtrack
          | Continue
-         | Complete Chan
+         -- Complete shouldn't need extra data. It just says 'stop
+         -- listening on this channel'
+         | Complete 
 
 -- Each thread needs to keep track of various information, including if
 -- it's speculative, a stack of continuations, and a list of channels it
 -- has received speculative information on, and a list it has sent
 -- speculative information on.
-type ThreadMap r a = Map PID (SpecTag, Stack ((Proc r a), KType), [Ch], [Ch])
-type Comp r a = StateT (PID, ThreadMap r a) a
+--
+-- <s>XXX: We need to track channels we sent on and received on
+-- seperately. channels we sent on, we need to listen for backtrack
+-- messages, ... on second thought, do we? What if we just keep the
+-- channels, and then listen on the receiving end. If we get a backtrack
+-- message, we backtrack, and keep listening on that channel. If we get
+-- an unsend/unrecv on it, we process it. Why do we care if we sent or
+-- received on it?</s>
+type ThreadMap r a = Map PID (SpecTag, Stack ((Proc r a), KType), [ChId])
+-- <s>XXX: This [Ch] should probably be more like Map ChId Ch. We
+-- need this to keep track of message id's for each channel.</s> 
+type Comp r a = StateT (PID, ThreadMap r a, Map ChId Ch) a
 
--- I use the continuation monad here, not for concurrency, but to
--- allow me to wrap final answers in a list, easing the collection of
--- answers from all threads, and allowing nondeterminism to be added
--- more easily.
-type Proc r a = Cont (Comp r IO [r]) a
+-- Continuations used for backtracking through a stack of continuations.
+-- XXX: I'm a little worried about the mutual recursion in these
+-- types... I'm pretty sure I can't do that, but we'll wait until I ask
+-- the type checker. or until I make a decision about the next XXX
+--
+-- XXX: Maybe ThreadMap should have a stack of Cont ?? (). That would
+-- simplify the interface too.
+type Proc r a = Cont (Comp r IO r) a
 
 -- Some interface methods
+-- XXX: Most of these are now incorrect. 
+-- TODO: Lots of interfaces methods are missing.
 getPID :: Proc r PID
 getPID = fmap fst get
 
@@ -98,14 +124,16 @@ getStack pid = fmap (_getThreadMapVal pid) \(_,x,_) -> x
 getSpecChans :: Proc r [Ch]
 getSpecChans pid = fmap (_getThreadMapVal pid) \(_,_,x) -> x
 
+-- TODO: Should runStateT with the same state, except the current
+-- thread's pid incremented.
+runChild = undefined
+
 -- end of interface
 
 par :: Show r => Proc r a -> Proc r a -> Proc r a
 par (Cont c1) (Cont c2) = Cont (\k -> do
-  ppid <- getPID
-  map <- getThreadMap
-  let b1 = runStateT (c1 k) (ppid+1, map)
-  let b2 = runStateT (c2 k) (ppid+2, map)
+  let b1 = runChild (c1 k) -- runStateT (c1 k) (ppid+1, map)
+  let b2 = runChild (c2 k) --runStateT (c2 k) (ppid+2, map)
   liftIO $ runPar b1 b2)
 
 -- Still useful in a concurrent environment, but useless in true
@@ -114,64 +142,103 @@ yield :: Proc r ()
 yield = Cont (\k -> do 
   liftIO CC.yield; k ())
 
+-- TODO: Alter to create a full duplex channel, init message IDs, etc.
+-- Should also mark as speculative if the current thread is.
 newChan :: Proc r (Chan a)
 newChan = Cont (\k -> do ch <- liftIO CC.newChan; k ch)
 
--- <s>TODO</s>: Need to alter so that, when we send on a channel, if the
--- current thread is speculative, we mark the channel as speculative. We
--- must also push a properly tagged continuation onto the stack.
-send :: Chan Int -> Int -> Proc r ()
+-- XXX: I'm not sure if callCC works here, in this way. I'm pretty sure
+-- it doesn't.
+send :: Ch -> Int -> Proc r ()
 send ch s = callCC $ \cc -> Cont (\k -> do 
-  pid <- getPID
-  msgid <- getMsgId ch
-  pushKStack pid cc
-  specTag <- getSpecTag pid
-  liftIO $ putStrLn ("PID: " ++ (show pid) ++ " Sending: " ++ (show s))
-  liftIO $ writeChan ch $ Send specTag msgid s
-  if specTag
-    then addSpecSendCh pid ch
+  -- TODO: Lots of undefined methods. At this point, they're pretty much
+  -- methods, given the way I'm using them is rather object oriented.
+  -- XXX: Double check that these are the right data structure, i.e. the
+  -- order of variables.
+  msg@(Send spec_s p msgid_s) <- buildMsg ch s
+  sendMsg ch msg
+  (Acknowledge spec_a msgid_a) <- recvAck ch s
+  --liftIO $ putStrLn ("PID: " ++ (show pid) ++ " Sending: " ++ (show s))
+  --liftIO $ writeChan ch $ msg
+  if spec_s `or` spec_a
+    then tagSendCh ch
     else nothing
+  -- XXX: Sanity crash
+  if msgid_s != msgid_a
+    then undefined
+    else nothing
+  pushKStack cc $ Send msgid_s
   k ());
   
 
--- <s>TODO</s>: Same as send.
-recv :: Chan Int -> Proc r Int
+-- TODO: Same as send.
+recv :: Ch -> Proc r Int
 recv ch = callCC $ \cc -> Cont (\k -> do 
-  pid <- getPID
-  pushKStack pid cc 
-  (Send spec i) <- liftIO $ readChan ch
-  if spec
-    then addSpecRecvCh pid ch
+  (Send spec_s p msgid_s) <- recvMsg ch
+  ack@(Acknowledge spec_a msgid_a) <- buildAck ch 
+  sendAck ack ch
+  if spec_s `or` spec_a
+    then tagRecvCh ch
     else nothing
-  trace ("PID: " ++ show pid ++ " Recv: " ++ (show i)) $ return ()
+  -- XXX: Sanity crash
+  if msgid_s != msgid_a
+    then undefined
+    else nothing
+  pushKStack cc $ Recv msgid_a
   k i)
 
--- <s>TODO</s>: We need to mark the current thread a speculative, and push a
--- Choose continuation onto the stack for this thread.
+-- XXX: Same note as send for callCC and undefined methods
 choose :: Proc r a -> Proc r a -> Proc r a
-choose (Cont c1) (Cont c2) = callCC $ \cc -> Cont (\k -> do 
-  pid <- getPID
-  -- TODO: Need way to remember last choose, so we can get to next
-  -- choose. Perhaps a function which takes c1 and c2 and chooses one?
-  pushKStack pid cc
-  setSpecTag pid
-  st <- get
-  b1 <- liftIO $ runStateT (c1 k) st
-  liftIO $ return b1)
+choose (Cont c1) k2@(Cont c2) = callCC $ \cc -> Cont (\k -> do 
+  -- XXX: This seems a little naive. We store the next choice, and
+  -- always take the first one first. There feels like a little room for
+  -- abstraction here.
+  -- It also hides the fact that the second choice is ever used... I
+  -- don't like this solution.
+  pushKStack cc $ Choose k2
+  tagThread
+  c1 k)
+--  st <- get
+--  b1 <- liftIO $ runStateT (c1 k) st
+--  liftIO $ return b1)
 
--- TODO: When we reach a backtrack, we need to send a message out on all
+-- TODO: Implement
+--backToChoice :: ???
+-- backToChoice = do
+--   pop a continuation.
+--   case:
+--      if send then sendUnsend; backToChoice
+--      if recv then sendUnrecv; backToChoice
+--      if choose then return 
+  
+-- TODO: Implement
+-- sendBackTrack :: ??
+-- sendBackTrack = do
+--   get speculative (probably all?) channels
+--   send backtrack message
+--   do we need the acknowledgment?
+
+-- When we reach a backtrack, we need to send a message out on all
 -- speculative channels telling them to backtrack. They should
 -- immediately pop a continuation, and wait for more messages.
 --
--- This thread should begin poping continuation, sending unsend and
+-- This thread should begin popping continuation, sending unsend and
 -- unrecv messages, until it reaches a choose statement. At the choose
 -- statement, it should send a Continue message
 backtrack :: Proc r a
-backtrack = Cont (\k -> do
-  pid <- getPID
-  liftIO $ putStrLn ("PID: " ++ (show pid) ++ " backtracking..")
-  liftIO $ return [])
+backtrack = Cont (\_ -> do
+  sendBacktrack
+  k <- backToChoice
+  k ())
+  --pid <- getPID
+  --liftIO $ putStrLn ("PID: " ++ (show pid) ++ " backtracking..")
+  --liftIO $ return [])
 
+-- TODO: Change so we only return a single value. When run in parallel,
+-- the second task should return the value, while the first can just
+-- print it out. or do whatever. I don't really care.
+-- XXX: I wonder if I can now make use of the built in par. The only
+-- concern there is I won't be guaranteed to have them run in parallel.
 wrapProc :: Show r => IO [r] -> MVar () -> MVar [r] -> IO ()
 wrapProc p block mvar = do
   xs <- p
