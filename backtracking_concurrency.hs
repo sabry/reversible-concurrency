@@ -1,3 +1,9 @@
+-- Note:
+--   TODO tags indicate (shockingly) something that needs to be done
+--   XXX tags indicate comments, notes to self, observations, or
+--   thoughts that are not tasks, but things that need to be considered
+--   or things to be aware of.
+--
 -- I've taken up not deleting TODO and XXX tags, as they might be useful as
 -- notes if/when I have to write about this. Instead, completed ones are
 -- surrounded by HTML strike tags (<s></s>) 
@@ -84,10 +90,10 @@ data Msg = Send SpecTag MsgId Int
 -- message, we backtrack, and keep listening on that channel. If we get
 -- an unsend/unrecv on it, we process it. Why do we care if we sent or
 -- received on it?</s>
-type ThreadMap r a = Map PID (SpecTag, Stack ((Proc r a), KType), [ChId])
+type ThreadMap r = Map PID (SpecTag, Stack (Proc r (), KType), [ChId])
 -- <s>XXX: This [Ch] should probably be more like Map ChId Ch. We
 -- need this to keep track of message id's for each channel.</s> 
-type Comp r a = StateT (PID, ThreadMap r a, Map ChId Ch) a
+type Comp r a = StateT (PID, ThreadMap r, Map ChId Ch) a
 
 -- Continuations used for backtracking through a stack of continuations.
 -- XXX: I'm a little worried about the mutual recursion in these
@@ -99,8 +105,8 @@ type Comp r a = StateT (PID, ThreadMap r a, Map ChId Ch) a
 type Proc r a = Cont (Comp r IO r) a
 
 -- Some interface methods
--- XXX: Most of these are now incorrect. 
--- TODO: Lots of interfaces methods are missing.
+-- TODO: Lots of interfaces methods are missing. Most of these are
+-- broken now.
 getPID :: Proc r PID
 getPID = fmap fst get
 
@@ -147,13 +153,13 @@ yield = Cont (\k -> do
 newChan :: Proc r (Chan a)
 newChan = Cont (\k -> do ch <- liftIO CC.newChan; k ch)
 
--- XXX: I'm not sure if callCC works here, in this way. I'm pretty sure
--- it doesn't.
+-- XXX: I think callCC will work this way, but it might be interesting
+-- to look at how stabilizers could play a role here.
 send :: Ch -> Int -> Proc r ()
 send ch s = callCC $ \cc -> Cont (\k -> do 
   -- TODO: Lots of undefined methods. At this point, they're pretty much
   -- methods, given the way I'm using them is rather object oriented.
-  -- XXX: Double check that these are the right data structure, i.e. the
+  -- TODO: Double check that these are the right data structure, i.e. the
   -- order of variables.
   msg@(Send spec_s p msgid_s) <- buildMsg ch s
   sendMsg ch msg
@@ -167,10 +173,9 @@ send ch s = callCC $ \cc -> Cont (\k -> do
   if msgid_s != msgid_a
     then undefined
     else nothing
-  pushKStack cc $ Send msgid_s
+  pushKStack $ Cont (\_ -> do send ch s; cc ()) $ Send msgid_s
   k ());
   
-
 -- TODO: Same as send.
 recv :: Ch -> Proc r Int
 recv ch = callCC $ \cc -> Cont (\k -> do 
@@ -184,18 +189,16 @@ recv ch = callCC $ \cc -> Cont (\k -> do
   if msgid_s != msgid_a
     then undefined
     else nothing
-  pushKStack cc $ Recv msgid_a
+  pushKStack $ Cont (\_ -> do r <- recv ch; cc r) $ Recv msgid_a
   k i)
 
--- XXX: Same note as send for callCC and undefined methods
 choose :: Proc r a -> Proc r a -> Proc r a
 choose (Cont c1) k2@(Cont c2) = callCC $ \cc -> Cont (\k -> do 
   -- XXX: This seems a little naive. We store the next choice, and
   -- always take the first one first. There feels like a little room for
   -- abstraction here.
-  -- It also hides the fact that the second choice is ever used... I
-  -- don't like this solution.
-  pushKStack cc $ Choose k2
+  -- Unexpected behavior if we try to backtrack after the second choice.
+  pushKStack $ Cont (\_ -> do r <- c2 k $ cc r) $ Choose
   tagThread
   c1 k)
 --  st <- get
@@ -203,7 +206,15 @@ choose (Cont c1) k2@(Cont c2) = callCC $ \cc -> Cont (\k -> do
 --  liftIO $ return b1)
 
 -- TODO: Implement
---backToChoice :: ???
+backToChoice :: Proc r (Proc r ())
+backToChoice = do
+  (k, ktype) <- popCont
+  case ktype of:
+       -- TODO: Ensure var order of contructors
+       -- TODO: More helpers to build
+       Send chid msgid -> sendMsg chid $ buildUnsend msgid
+       Recv chid msgid -> sendMsg chid $ buildUnrecv msgid
+       Choose -> return k
 -- backToChoice = do
 --   pop a continuation.
 --   case:
@@ -211,28 +222,51 @@ choose (Cont c1) k2@(Cont c2) = callCC $ \cc -> Cont (\k -> do
 --      if recv then sendUnrecv; backToChoice
 --      if choose then return 
   
--- TODO: Implement
--- sendBackTrack :: ??
--- sendBackTrack = do
---   get speculative (probably all?) channels
---   send backtrack message
---   do we need the acknowledgment?
-
--- When we reach a backtrack, we need to send a message out on all
--- speculative channels telling them to backtrack. They should
--- immediately pop a continuation, and wait for more messages.
+-- When we reach a backtrack, we should start popping continuations, and
+-- sending unsend/unrecv messages accordingly. At the choose statement,
+-- it should send a Continue message
 --
--- This thread should begin popping continuation, sending unsend and
--- unrecv messages, until it reaches a choose statement. At the choose
--- statement, it should send a Continue message
 backtrack :: Proc r a
 backtrack = Cont (\_ -> do
-  sendBacktrack
-  k <- backToChoice
-  k ())
+  (Cont c) <- backToChoice
+  c ())
   --pid <- getPID
   --liftIO $ putStrLn ("PID: " ++ (show pid) ++ " backtracking..")
   --liftIO $ return [])
+  
+endProcess :: r -> Proc r a
+endProcess r = Cont (\k -> do
+  -- for each chid in our list of speculative channels:
+  --   nonblocking check for a message:
+  --   XXX: Might transactional event be useful in the nonblocking
+  --   receive?
+  --   case:
+  --     continue: remove chid from speculative list
+  --     unsend: pop a continuation until we find a send message with
+  --       the same msg id
+  --     unrecv: same as unsend, but looking at recv ktypes.
+  -- no chid's: return r     
+  )
+completeOrBacktrack :: chid -> Proc r a 
+completeOrBacktrack chid = Cont (\k -> do
+  msg <- recvMsg chid
+  case msg of:
+    Complete -> sendMsg chid Complete
+               remSpecCh chid
+    Unsend msgid -> backToMsg msgid
+    Unrecv msgid -> backToMsg msgid)
+
+-- XXX: This needs to be r -> IO r. But, we also need Proc r a in order to
+-- access the state/continutations and such.
+-- Could we make it r -> Proc r a and just recursively call runProc,
+-- giving it a base case when we receive a Complete?
+waitForMessage :: r -> Proc r a
+waitForMessage res = Cont (\k -> do
+  chids <- getSpecChans
+  if null chids
+    then return res
+    else map completeOrBacktrack chids
+         waitForMessage res)
 
 -- TODO: Change so we only return a single value. When run in parallel,
 -- the second task should return the value, while the first can just
@@ -245,6 +279,16 @@ wrapProc p block mvar = do
 --  putStrLn ("Returning: " ++ (show xs))
   modifyMVar_ mvar (\ls -> return $ xs ++ ls)
   putMVar block ()
+
+wrapProcPrint :: Show r => IO r -> IO ()
+wrapProcPrint p = do
+  r <- p
+  putStrLn r
+
+wrapProcRes :: IO r -> MVar r -> IO ()
+wrapProc p res = do
+  r <- p
+  putMVar res r
 
 forkChild :: MVar [r] -> MVar [MVar ()] -> 
             (MVar () -> MVar [r] -> IO ()) -> IO ThreadId
@@ -263,20 +307,24 @@ waitOnChildren children = do
     takeMVar x
     waitOnChildren children
 
-runPar :: Show r => IO [r] -> IO [r] -> IO [r]
+runPar :: Show r => IO r -> IO r -> IO r
 runPar k1 k2 = do
-  children <- newMVar []
-  results <- newMVar []
+  --children <- newMVar []
+  --results <- newMVar []
+  result <- newEmptyMVar
   -- We might cause some unintentional ordering by spawning one of these
   -- first, as it gets a head start. But.. I think that's unavoidable.
-  forkChild results children $ wrapProc k1
-  forkChild results children $ wrapProc k2
+  --forkChild results children $ wrapProc k1
+  --forkChild results children $ wrapProc k2
+  forkIO $ wrapProcPrint k1
+  forkIO $ wrapProcRes k2 res
   -- Block until all children have returned
-  waitOnChildren children
-  takeMVar results
+  --waitOnChildren children
+  --takeMVar results
+  takeMVar result
 
-runProc :: Show r => Proc r r -> IO [r]
-runProc p = runReaderT (runCont p (\r -> return [r])) 0
+runProc :: Show r => Proc r r -> IO r
+runProc p = runReaderT (runCont p (\r -> return r)) 0
 
 -- All the tests have data returned in an unexpected order. This make
 -- sense in some of the tests, as the parallelism is non-deterministic as
@@ -337,6 +385,11 @@ test4 = do ch <- newChan
 -- What's more curious is the result we normally get, being [1,1,10]. I
 -- haven't figured out why we get two 1's. Maybe it's due to both
 -- duplicated continutations and true parallelism.
+--
+-- XXX: I can't figure out how to get the Cont monad's return to do what
+-- I want, as I have to give a function of type r -> IO r, but I need a
+-- function r -> Proc r a. So... we return with endProcess, and return
+-- from there after checking for backtracking messages and such
 test5 :: Proc Int Int
 test5 = do ch1 <- newChan
            ch2 <- newChan
@@ -347,8 +400,8 @@ test5 = do ch1 <- newChan
                 y <- recv ch2
                 if y == 0
                   then backtrack
-                  else return y)
+                  else endProcess y)
             (do a <- recv ch1
                 if a == 1
-                  then do send ch2 0; return 0
-                  else do send ch2 1; return 10)
+                  then do send ch2 0; endProcess 0
+                  else do send ch2 1; endProcess 10)
