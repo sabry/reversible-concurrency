@@ -20,8 +20,8 @@ import Control.Monad.Cont
 import qualified Control.Concurrent as CC (yield,newChan)
 import Control.Monad.State
 import Debug.Trace
-import qualified Data.Map as Map
-import Data.Map (Map, (!), adjust, insert)
+import qualified Data.Map as M 
+import Data.Map (Map, adjust, insert, (!))
 
 -- Honestly, there's no Data.Stack?
 -- Quick stack implementation
@@ -51,7 +51,7 @@ type Ch = (Chan Msg, Chan Msg, SpecTag, Msgid)
 
 -- KType indicates the type of a continuation, which is needed to figure
 -- out what to do when backtracking
-data KType = Sent Msgid
+data KType = Sent Chid Msgid
            | Choose
 
 -- Messages that can be sent over the channels.
@@ -86,51 +86,56 @@ data Msg = Send SpecTag Msgid Int
 -- message, we backtrack, and keep listening on that channel. If we get
 -- an unsend/unrecv on it, we process it. Why do we care if we sent or
 -- received on it?</s>
-type ContStack r = Stack (Proc r (), KType)
+type ContStack r = Stack (() -> r, KType)
 type ThreadState r = (SpecTag, ContStack r, [Chid])
 type ThreadMap r = Map Pid (ThreadState r) 
 
 -- <s>XXX: This [Ch] should probably be more like Map Chid Ch. We
 -- need this to keep track of message id's for each channel.</s> 
 type GlobalState r = (Pid, Chid, ThreadMap r, Map Chid Ch)
-type Comp r a = StateT (GlobalState r) a
+type Comp r a = StateT (GlobalState r) IO a
 
 -- Continuations used for backtracking through a stack of continuations.
 -- XXX: I'm a little worried about the mutual recursion in these
 -- types... I'm pretty sure I can't do that, but we'll wait until I ask
 -- the type checker. or until I make a decision about the next XXX
 --
+-- XXX: Turns out I was right about that cycle. :/
+--
 -- XXX: Maybe ThreadMap should have a stack of Cont ?? (). That would
 -- simplify the interface too.
-type Proc r a = Cont (Comp r IO r) a
+type Proc r a = Cont (Comp r r) a
 
 -- Interface methods for tuples
 fst3 :: (a, b, c) -> a
-fst3 a b c = a
+fst3 (e,_,_) = e
 
 snd3 :: (a, b, c) -> b
-snd3 a b c = b
+snd3 (_,e,_) = e
 
 thrd3 :: (a ,b, c) -> c
-thrd3 a b c = c
+thrd3 (_,_,e) = e
 
 fst4 :: (a, b, c, d) -> a
-fst4 a b c d = a
+fst4 (e,_,_,_) = e
 
 snd4 :: (a, b, c, d) -> b
-snd4 a b c d = b
+snd4 (_,e,_,_) = e
 
 thrd4 :: (a ,b, c, d) -> c
-thrd4 a b c d = c
+thrd4 (_,_,e,_) = e
 
 frth4 :: (a, b, c, d) -> d
-frth4 a b c d = d 
+frth4 (_,_,_,e) = e
 
 -- end tuples
 
+--(!) :: Ord r => r -> Map r a -> a
+--(!) = flip (M.!)
+
 -- Some interface methods for the thread state, and global state.
--- TODO: Lots of interfaces methods are missing. Most of these are
--- broken now.
+-- <s>TODO: Lots of interfaces methods are missing. Most of these are
+-- broken now.</s>
 getPid :: Comp r Pid
 getPid = fmap fst4 get
 
@@ -144,27 +149,27 @@ incChid = do
   put (a, chid, c, d)
   return chid
 
-getThreadMap :: Comp r (ThreadMap r a)
+getThreadMap :: Comp r (ThreadMap r)
 getThreadMap = fmap thrd4 get 
 
 getChanMap :: Comp r (Map Chid Ch)
 getChanMap = fmap frth4 get 
 
 putChanMap :: Map Chid Ch -> Comp r ()
-putChanMap c = do
-  (a, b, _, d) <- get
+putChanMap d = do
+  (a, b, c, _) <- get
   put (a, b, c, d)
 
 -- Get the message id for a channel.
 getMsgid :: Chid -> Comp r Msgid
-getMsgid chid = fmap getChanMap (! chid)
+getMsgid chid = fmap frth4 $ _getCh chid
 
 -- Increment the message id for the channel, and return the new id.
 incMsgid :: Chid -> Comp r Msgid
 incMsgid chid = do
   map <- getChanMap
   putChanMap $ adjust (\(a,b,c,d) -> (a,b,c,(1+d))) chid map
-  getMsgid 
+  getMsgid chid
 
 -- Methods prefixed with _ should be treated 'private'. More convenient 
 -- version are available that give a public interface.
@@ -181,7 +186,7 @@ _this f = do
 -- (a -> b) -> f a -> f b
 
 -- Get the thread state, stored in the global ThreadMap, by it's Pid
-_getThreadState :: Pid -> Comp r ThreadState a
+_getThreadState :: Pid -> Comp r (ThreadState a)
 _getThreadState pid = fmap (! pid) getThreadMap 
 
 _putThreadState :: Pid -> ThreadState a -> Comp r ()
@@ -196,33 +201,36 @@ _getThreadStatePos pid f = fmap f $ _getThreadState pid
 _getSpecTag :: Pid -> Comp r SpecTag
 _getSpecTag pid = fmap fst3 $ _getThreadState pid
 
-_setSpecTag :: Pid -> Comp r ()
-_setSpecTag pid = do
+_setSpecTag :: Bool -> Pid -> Comp r ()
+_setSpecTag b pid = do
   (_, a, b) <- _getThreadState pid
-  _putThreadState pid (True, a, b)
+  _putThreadState pid (b, a, b)
 
 getSpecTag :: Comp r SpecTag
 getSpecTag = _this _getSpecTag 
 
-setSpecTag :: Comp r ()
-setSpecTag = _this _setSpecTag 
+setSpecTag :: Bool -> Comp r ()
+setSpecTag b = _this $ _setSpecTag 
 
-_getContStack :: Pid -> Comp r ContStack r
-_getContStack pid = fmap snd3 $ _getThreadMapVal pid
+_getContStack :: Pid -> Comp r (ContStack r)
+_getContStack pid = fmap snd3 $ _getThreadState pid
 
 _putContStack :: ContStack r -> Pid -> Comp r ()
 _putContStack st pid = do
   (a, _, b) <- _getThreadState pid 
   _putThreadState pid (a, st, b)
 
-getContStack :: Comp r ContStack r
+getContStack :: Comp r (ContStack r)
 getContStack = _this _getContStack
 
 putContStack :: ContStack r -> Comp r ()
 putContStack st = _this $ _putContStack st
 
 _getSpecChans :: Pid -> Comp r [Chid]
-_getSpecChans pid = fmap thr3 $ _getThreadMapVal pid
+_getSpecChans pid = fmap thrd3 $ _getThreadState pid
+
+getSpecChans :: Comp r [Chid]
+getSpecChans = _this _getSpecChans
 
 -- Add a new full duplex channel to the map, creating a channel id for
 -- it, and returning that id.
@@ -262,10 +270,10 @@ _getRecvCh :: Chid -> Comp r (Chan Msg)
 _getRecvCh ch = fmap snd4 (_getCh ch)
 
 -- Tag a channel as speculative
-tagCh :: Chid -> Comp r ()
-tagCh chid = do
+setChTag :: Bool -> Chid -> Comp r ()
+setChTag bool chid = do
   map <- getChanMap
-  putChanMap $ adjust (\(a,b,_,c) -> (a,b,True,c)) chid map
+  putChanMap $ adjust (\(a,b,_,c) -> (a,b,bool,c)) chid map
 
 -- Send a message. On the send channel.
 sendMsg :: Chid -> Msg -> Comp r ()
@@ -278,6 +286,17 @@ sendAck chid msg = do
   ch <- _getRecvCh chid
   liftIO $ writeChan ch msg
 
+recvMsg :: Chid -> Comp r Msg
+recvMsg chid = do
+  ch <- _getRecvCh chid
+  liftIO $ readChan ch 
+
+nbGetMsg :: Chid -> Maybe (Comp r Msg)
+nbGetMsg chid = do
+  ch <- _getRecvCh chid
+  when (isEmptyChan ch) $ return Nothing
+  liftIO $ Just $ readChan ch
+
 -- Receive an acknowlegement, on the receive channel.
 recvAck :: Chid -> Comp r Msg
 recvAck chid = do
@@ -285,12 +304,12 @@ recvAck chid = do
   liftIO $ readChan ch
 
 -- Push a continuation onto the stack.
-pushCont :: Proc r () -> KType -> Comp r ()
+pushCont :: (() -> r) -> KType -> Comp r ()
 pushCont k ktype = do
   stack <- getContStack
   putContStack $ push (k, ktype) stack
 
-popCont :: Comp r (Proc r ())
+popCont :: Comp r (() -> r)
 popCont = do
   st <- getContStack
   let (h, st) = pop st
@@ -318,8 +337,8 @@ yield :: Proc r ()
 yield = Cont (\k -> do 
   liftIO CC.yield; k ())
 
--- TODO: Alter to create a full duplex channel, init message IDs, etc.
--- Should also mark as speculative if the current thread is.
+-- <s>TODO: Alter to create a full duplex channel, init message IDs, etc.
+-- Should also mark as speculative if the current thread is.</s>
 newChan :: Proc r (Chid)
 newChan = Cont (\k -> do 
   sch <- liftIO CC.newChan
@@ -331,40 +350,32 @@ newChan = Cont (\k -> do
 -- to look at how stabilizers could play a role here.
 send :: Chid -> Int -> Proc r ()
 send ch s = callCC $ \cc -> Cont (\k -> do 
-  -- TODO: Lots of undefined methods. At this point, they're pretty much
+  -- <s>TODO: Lots of undefined methods. At this point, they're pretty much
   -- methods, given the way I'm using them is rather object oriented.
   -- TODO: Double check that these are the right data structure, i.e. the
-  -- order of variables.
+  -- order of variables.</s>
   msg@(Send spec_s msgid_s p) <- buildSendMsg ch s
   sendMsg ch msg
   (Acknowledge spec_a msgid_a) <- recvAck ch
   --liftIO $ putStrLn ("Pid: " ++ (show pid) ++ " Sending: " ++ (show s))
   --liftIO $ writeChan ch $ msg
-  if spec_s `or` spec_a
-    then tagCh ch
-    else nothing
+  when (spec_s `or` spec_a) $ setChTag True ch
   -- XXX: Sanity crash
-  if msgid_s != msgid_a
-    then undefined
-    else nothing
-  pushCont $ Cont (\_ -> do send ch s; cc ()) $ Sent msgid_s
+  when (msgid_s /= msgid_a) $ undefined
+  pushCont (\_ -> runProc (do send ch s; cc ())) $ Sent ch msgid_s
   k ());
   
--- TODO: Same as send.
+-- <s>TODO: Same as send.</s>
 recv :: Ch -> Proc r Int
 recv ch = callCC $ \cc -> Cont (\k -> do 
-  (Send spec_s p msgid_s) <- recvMsg ch
+  (Send spec_s msgid_s p) <- recvMsg ch
   ack@(Acknowledge spec_a msgid_a) <- buildAckMsg ch 
   sendAck ack ch
-  if spec_s `or` spec_a
-    then tagCh ch
-    else nothing
+  when (spec_s `or` spec_a) setChTag True ch
   -- XXX: Sanity crash
-  if msgid_s != msgid_a
-    then undefined
-    else nothing
-  pushCont $ Cont (\_ -> do r <- recv ch; cc r) $ Sent msgid_a
-  k i)
+  when (msgid_s /= msgid_a) $ undefined
+  pushCont (\_ -> runProc $  do r <- recv ch; cc r) $ Sent ch msgid_a
+  k p)
 
 choose :: Proc r a -> Proc r a -> Proc r a
 choose (Cont c1) k2@(Cont c2) = callCC $ \cc -> Cont (\k -> do 
@@ -372,22 +383,22 @@ choose (Cont c1) k2@(Cont c2) = callCC $ \cc -> Cont (\k -> do
   -- always take the first one first. There feels like a little room for
   -- abstraction here.
   -- Unexpected behavior if we try to backtrack after the second choice.
-  pushCont $ Cont (\_ -> do r <- c2 k; cc r) $ Choose
-  setSpecTag 
+  pushCont (\_ -> runProc $ do r <- c2 k; cc r) $ Choose
+  setSpecTag True
   c1 k)
 --  st <- get
 --  b1 <- liftIO $ runStateT (c1 k) st
 --  liftIO $ return b1)
 
 -- <s>TODO: Implement</s>
-backToChoice :: Proc r (Proc r ())
+backToChoice :: Proc r (() -> r)
 backToChoice = do
   (k, ktype) <- popCont
   case ktype of
     -- <s>TODO: Ensure var order of contructors</s>
     -- <s>TODO: More helpers to build</s>
-    Sent msgid -> do 
-      msg <- buildUnsend msgid
+    Sent chid msgid -> do 
+      msg <- buildUnsendMsg msgid
       sendMsg chid msg
     Choose -> return k
 -- backToChoice = do
@@ -411,11 +422,11 @@ backtrack = Cont (\_ -> do
   
 -- Pop continutations until we find the one with the message id we're
 -- looking for.
-backToMsgid :: Msgid -> Proc r ()
+backToMsgid :: Msgid -> Proc r (() -> r)
 backToMsgid msgid = do
   (c, ktype) <- popCont
   case ktype of
-    Send _ msgid_ | msgid == msgid_ -> c
+    Send _ msgid_ | msgid == msgid_ -> return c
     _ -> backToMsgid msgid
 
 -- Wait on a particular channel for more Unsend or a Continue
@@ -426,7 +437,7 @@ waitForMsg chid c = do
     Continue -> c ()
     Unsend msgid  -> do
       c <- backToMsgid msgid
-      waitForMsg x c
+      waitForMsg chid c
 
 -- Listen on all our speculative channels for either Continue or Unsend
 -- messages.
@@ -436,8 +447,8 @@ listenForMsg (x:xs) = do
   msg <- nbGetMsg x
   case msg of
     Just msg ->
-      case msg_ of
-        Continue -> remSpecCh x
+      case msg of
+        Continue -> setChTag False x
         Unsend msgid -> do
           c <- backToMsgid msgid
           waitForMsg x c
@@ -445,10 +456,8 @@ listenForMsg (x:xs) = do
 
 endProcess :: r -> Proc r a
 endProcess r = do
-  xs <- getSpecChs
-  if null xs
-    then return r
-    else nothing
+  xs <- getSpecChans
+  when (null xs) $ return r
   (Cont c1) <- listenForMsg xs
   c1 ()
   endProcess r
@@ -473,9 +482,9 @@ endProcess r = do
 --     else map completeOrBacktrack chids
 --          waitForMessage res)
 
--- TODO: Change so we only return a single value. When run in parallel,
+-- <s>TODO: Change so we only return a single value. When run in parallel,
 -- the second task should return the value, while the first can just
--- print it out. or do whatever. I don't really care.
+-- print it out. or do whatever. I don't really care.</s>
 -- XXX: I wonder if I can now make use of the built in par. The only
 -- concern there is I won't be guaranteed to have them run in parallel.
 wrapProc :: Show r => IO [r] -> MVar () -> MVar [r] -> IO ()
@@ -491,7 +500,7 @@ wrapProcPrint p = do
   putStrLn r
 
 wrapProcRes :: IO r -> MVar r -> IO ()
-wrapProc p res = do
+wrapProcRes p res = do
   r <- p
   putMVar res r
 
@@ -522,14 +531,14 @@ runPar k1 k2 = do
   --forkChild results children $ wrapProc k1
   --forkChild results children $ wrapProc k2
   forkIO $ wrapProcPrint k1
-  forkIO $ wrapProcRes k2 res
+  forkIO $ wrapProcRes k2 result
   -- Block until all children have returned
   --waitOnChildren children
   --takeMVar results
   takeMVar result
 
 runProc :: Show r => Proc r r -> IO r
-runProc p = runReaderT (runCont p (\r -> return r)) 0
+runProc p = runStateT (runCont p (\r -> return r)) 0
 
 -- All the tests have data returned in an unexpected order. This make
 -- sense in some of the tests, as the parallelism is non-deterministic as
