@@ -19,10 +19,11 @@ import Control.Concurrent hiding (yield,newChan)
 import Control.Monad.Cont
 import qualified Control.Concurrent as CC (yield,newChan)
 import Control.Monad.State
-import Debug.Trace
+--import Debug.Trace
 import qualified Data.Map as M 
 import Data.Map (Map, adjust, insert)
 
+trace _ r = r
 -- Honestly, there's no Data.Stack?
 -- Quick stack implementation
 type Stack a = [a]
@@ -93,7 +94,7 @@ type ThreadMap r = Map Pid (ThreadState r)
 
 -- <s>XXX: This [Ch] should probably be more like Map Chid Ch. We
 -- need this to keep track of message id's for each channel.</s> 
-type GlobalState r = (Pid, Chid, ThreadMap r, Map Chid Ch)
+type GlobalState r = (Pid, Chid, ThreadState r, Map Chid Ch)
 type Comp r a = StateT (GlobalState r) IO a
 
 -- Continuations used for backtracking through a stack of continuations.
@@ -132,7 +133,7 @@ frth4 (_,_,_,e) = e
 -- end tuples
 
 (!) :: Show r => Ord r => Map r a -> r -> a
-(!) m r= trace (show r) $ (m M.! r)
+(!) m r =  trace (show r) $ (m M.! r)
 
 -- Some interface methods for the thread state, and global state.
 -- <s>TODO: Lots of interfaces methods are missing. Most of these are
@@ -155,8 +156,8 @@ incChid = do
   put (a, chid, c, d)
   return b
 
-getThreadMap :: Comp r (ThreadMap r)
-getThreadMap = fmap thrd4 get 
+getThreadState :: Comp r (ThreadState r)
+getThreadState = fmap thrd4 get 
 
 getChanMap :: Comp r (Map Chid Ch)
 getChanMap = fmap frth4 get 
@@ -184,59 +185,47 @@ incMsgid chid = do
 -- calls it on this thread.
 -- XXX: Not really sure how I did this, but I created an object-oriented
 -- like model using the state monad...
-_this :: (Pid -> Comp r a) -> Comp r a
-_this f = do 
-  pid <- getPid
-  f pid
+-- _this :: (Pid -> Comp r a) -> Comp r a
+-- _this f = do 
+--   pid <- getPid
+--   trace ("This Pid: " ++ (show pid)) $ return ()
+--   f pid
 
 -- (a -> b) -> f a -> f b
 
+-- XXX: I'm stupid, we can run evalStateT for each new thread, so they
+-- only need to keep track of their own state.
 -- Get the thread state, stored in the global ThreadMap, by it's Pid
-_getThreadState :: Pid -> Comp r (ThreadState r)
-_getThreadState pid = fmap (! pid) getThreadMap 
+--_getThreadState :: Pid -> Comp r (ThreadState r)
+--_getThreadState pid = fmap (! pid) getThreadMap 
 
-_putThreadState :: Pid -> ThreadState r -> Comp r ()
-_putThreadState pid st = do
+putThreadState :: ThreadState r -> Comp r ()
+putThreadState st = do
   (a,b,map,d) <- get
-  put (a,b, adjust (\_ -> st) pid map, d)
+  put (a,b, map, d)
 
 -- Get an element out of the ThreadState triple.
-_getThreadStatePos :: Pid -> (ThreadState r -> d) -> Comp r d
-_getThreadStatePos pid f = fmap f $ _getThreadState pid
-
-_getSpecTag :: Pid -> Comp r SpecTag
-_getSpecTag pid = fmap fst3 $ _getThreadState pid
-
-_setSpecTag :: Bool -> Pid -> Comp r ()
-_setSpecTag t pid = do
-  (_, a, b) <- _getThreadState pid
-  _putThreadState pid (t, a, b)
+_getThreadStatePos :: (ThreadState r -> d) -> Comp r d
+_getThreadStatePos f = fmap f $ getThreadState
 
 getSpecTag :: Comp r SpecTag
-getSpecTag = _this _getSpecTag 
+getSpecTag = fmap fst3 $ getThreadState
 
 setSpecTag :: Bool -> Comp r ()
-setSpecTag b = _this $ _setSpecTag b
-
-_getContStack :: Pid -> Comp r (ContStack r)
-_getContStack pid = fmap snd3 $ _getThreadState pid
-
-_putContStack :: ContStack r -> Pid -> Comp r ()
-_putContStack st pid = do
-  (a, _, b) <- _getThreadState pid 
-  _putThreadState pid (a, st, b)
+setSpecTag t = do
+  (_, a, b) <- getThreadState 
+  putThreadState (t, a, b)
 
 getContStack :: Comp r (ContStack r)
-getContStack = _this _getContStack
+getContStack = fmap snd3 $ getThreadState
 
 putContStack :: ContStack r -> Comp r ()
-putContStack st = _this $ _putContStack st
-
-_getSpecChans :: Pid -> Comp r [Chid]
-_getSpecChans pid = fmap thrd3 $ _getThreadState pid
+putContStack st = do
+  (a, _, b) <- getThreadState 
+  putThreadState (a, st, b)
 
 getSpecChans :: Comp r [Chid]
-getSpecChans = _this _getSpecChans
+getSpecChans = fmap thrd3 $ getThreadState 
 
 -- Add a new full duplex channel to the map, creating a channel id for
 -- it, and returning that id.
@@ -251,7 +240,7 @@ addCh ch = do
 -- Build a send message, incrementing the message Id.
 buildSendMsg :: Chid -> Int -> Comp r Msg
 buildSendMsg chid s = do
-  msgid  <- incMsgid chid
+  msgid  <- getMsgid chid
   spec <- getSpecTag 
   return $ Send spec msgid s
 
@@ -312,6 +301,7 @@ nbGetMsg chid = do
 recvAck :: Chid -> Comp r Msg
 recvAck chid = do
   ch <- _getRecvCh chid 
+  _ <- incMsgid chid
   liftIO $ readChan ch
 
 -- Push a continuation onto the stack.
@@ -331,7 +321,8 @@ popCont = do
 -- <s>TODO: Should runStateT with the same state, except the current
 -- thread's pid incremented.</s>
 runChild :: GlobalState r -> (Int -> Int) -> Comp r r -> IO r
-runChild (pid, a,b,c) f k = evalStateT k (f pid, a, b, c)
+runChild (pid, a,b,c) f k = evalStateT k 
+  (f pid, a, b, c)
 
 -- end of interface
 
@@ -340,9 +331,9 @@ runChild (pid, a,b,c) f k = evalStateT k (f pid, a, b, c)
 par :: Show r => Proc r a -> Proc r a -> Proc r a
 par (Cont c1) (Cont c2) = Cont (\k -> do
   st <- get
-  let b1 = runChild st (+1) (c1 k) -- runStateT (c1 k) (ppid+1, map)
-  let b2 = runChild st (+2) (c2 k) --runStateT (c2 k) (ppid+2, map)
-  modifyPid (+2)
+  let b1 = runChild st (+0) (c1 k) -- runStateT (c1 k) (ppid+1, map)
+  let b2 = runChild st (+0) (c2 k) --runStateT (c2 k) (ppid+2, map)
+  --modifyPid (+2)
   liftIO $ runPar b1 b2)
 
 -- Still useful in a concurrent environment, but useless in true
@@ -376,8 +367,10 @@ send ch s = Cont (\k -> do
   trace "Acknowledged!" $ return ()
   --liftIO $ putStrLn ("Pid: " ++ (show pid) ++ " Sending: " ++ (show s))
   --liftIO $ writeChan ch $ msg
+  --XXX: Somehow these boolean tests are causing 'map.find: element not
+  --in map' errors?
   trace (show (spec_a || spec_s)) $ return ()
-  --when (spec_a || spec_s) $ setChTag True ch
+  when (spec_a || spec_s) $ setChTag True ch
   trace "Passed checks" $ return ()
   -- XXX: Sanity crash
   when (msgid_s /= msgid_a) $ undefined
@@ -393,8 +386,9 @@ recv ch = Cont (\k -> do
   ack@(Acknowledge spec_a msgid_a) <- buildAckMsg ch 
   sendAck ch ack
   trace "Sent acknowledgment" $ return ()
+  trace ("IDS: " ++ (show msgid_s) ++ " " ++ (show msgid_a)) $ return ()
   trace (show (spec_a || spec_s)) $ return ()
-  --when (spec_a || spec_s) $ setChTag True ch
+  when (spec_a || spec_s) $ setChTag True ch
   trace "Passed check" $ return ()
   -- XXX: Sanity crash
   when (msgid_s /= msgid_a) $ undefined
@@ -586,7 +580,7 @@ runPar k1 k2 = do
   takeMVar result
 
 runProc :: Show r => Proc r r -> IO r
-runProc p = evalStateT (runCont p (\r -> return r)) (0, 0, M.empty, M.empty)
+runProc p = evalStateT (runCont p (\r -> return r)) (0, 0, (False, empty, []), M.empty)
 
 -- All the tests have data returned in an unexpected order. This make
 -- sense in some of the tests, as the parallelism is non-deterministic as
@@ -615,7 +609,7 @@ test2 = (par (do yield; (par (return 1) (return 2)))
              (return 3))
 
 -- Expected: [0,3]
--- Results: 
+-- Results: [0,3]
 test3 :: Proc Int Int
 test3 = do ch <- newChan
            (par
@@ -625,18 +619,19 @@ test3 = do ch <- newChan
                   return (x+1)))
 
 -- Expected: [1,0,11]
--- Results: [1]
+-- Results: [1,0,11]
 test4 :: Proc Int Int
 test4 = do ch <- newChan
+           ch2 <- newChan
            (foldr1 par
-                 [do x <- recv ch; send ch (x+1); return 0,
+                 [do x <- recv ch; send ch2 (x+1); return 0,
                   return 1,
-                  do send ch 10; yield; y <- recv ch; return y])
+                  do send ch 10; yield; y <- recv ch2; return y])
 
 -- Expected: [10, 1]
--- Results: [1,1,10] or [2,0]
+-- Results: [0]
 --
--- There's a race condition caused by the channel, it seems. We can
+-- <s>There's a race condition caused by the channel, it seems. We can
 -- occasionally pull off the x we sent before the other thread has had
 -- a chance to receive it, despite the yield. It's interesting that
 -- we're both able to pull the value off the channel simultaneously,
@@ -646,7 +641,7 @@ test4 = do ch <- newChan
 --
 -- What's more curious is the result we normally get, being [1,1,10]. I
 -- haven't figured out why we get two 1's. Maybe it's due to both
--- duplicated continutations and true parallelism.
+-- duplicated continutations and true parallelism.</s>
 --
 -- XXX: I can't figure out how to get the Cont monad's return to do what
 -- I want, as I have to give a function of type r -> IO r, but I need a
