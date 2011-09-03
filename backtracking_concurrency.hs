@@ -21,7 +21,7 @@ import qualified Control.Concurrent as CC (yield,newChan)
 import Control.Monad.State
 import Debug.Trace
 import qualified Data.Map as M 
-import Data.Map (Map, adjust, insert, (!))
+import Data.Map (Map, adjust, insert)
 
 -- Honestly, there's no Data.Stack?
 -- Quick stack implementation
@@ -86,7 +86,8 @@ data Msg = Send SpecTag Msgid Int
 -- message, we backtrack, and keep listening on that channel. If we get
 -- an unsend/unrecv on it, we process it. Why do we care if we sent or
 -- received on it?</s>
-type ContStack r = Stack (() -> r, KType)
+type FakeCont r = () -> IO r
+type ContStack r = Stack (FakeCont r, KType)
 type ThreadState r = (SpecTag, ContStack r, [Chid])
 type ThreadMap r = Map Pid (ThreadState r) 
 
@@ -130,14 +131,19 @@ frth4 (_,_,_,e) = e
 
 -- end tuples
 
---(!) :: Ord r => r -> Map r a -> a
---(!) = flip (M.!)
+(!) :: Show r => Ord r => Map r a -> r -> a
+(!) m r= trace (show r) $ (m M.! r)
 
 -- Some interface methods for the thread state, and global state.
 -- <s>TODO: Lots of interfaces methods are missing. Most of these are
 -- broken now.</s>
 getPid :: Comp r Pid
 getPid = fmap fst4 get
+
+modifyPid :: (Int -> Int) -> Comp r ()
+modifyPid f = do 
+  (pid,a,b,c) <- get
+  put (f pid,a,b,c)
 
 getChid :: Comp r Chid 
 getChid = fmap snd4 get
@@ -147,7 +153,7 @@ incChid = do
   (a, b, c, d) <- get
   let chid = b+1
   put (a, chid, c, d)
-  return chid
+  return b
 
 getThreadMap :: Comp r (ThreadMap r)
 getThreadMap = fmap thrd4 get 
@@ -186,31 +192,31 @@ _this f = do
 -- (a -> b) -> f a -> f b
 
 -- Get the thread state, stored in the global ThreadMap, by it's Pid
-_getThreadState :: Pid -> Comp r (ThreadState a)
+_getThreadState :: Pid -> Comp r (ThreadState r)
 _getThreadState pid = fmap (! pid) getThreadMap 
 
-_putThreadState :: Pid -> ThreadState a -> Comp r ()
+_putThreadState :: Pid -> ThreadState r -> Comp r ()
 _putThreadState pid st = do
   (a,b,map,d) <- get
   put (a,b, adjust (\_ -> st) pid map, d)
 
 -- Get an element out of the ThreadState triple.
-_getThreadStatePos :: Pid -> ((a,b,c) -> d) -> Comp r d
+_getThreadStatePos :: Pid -> (ThreadState r -> d) -> Comp r d
 _getThreadStatePos pid f = fmap f $ _getThreadState pid
 
 _getSpecTag :: Pid -> Comp r SpecTag
 _getSpecTag pid = fmap fst3 $ _getThreadState pid
 
 _setSpecTag :: Bool -> Pid -> Comp r ()
-_setSpecTag b pid = do
+_setSpecTag t pid = do
   (_, a, b) <- _getThreadState pid
-  _putThreadState pid (b, a, b)
+  _putThreadState pid (t, a, b)
 
 getSpecTag :: Comp r SpecTag
 getSpecTag = _this _getSpecTag 
 
 setSpecTag :: Bool -> Comp r ()
-setSpecTag b = _this $ _setSpecTag 
+setSpecTag b = _this $ _setSpecTag b
 
 _getContStack :: Pid -> Comp r (ContStack r)
 _getContStack pid = fmap snd3 $ _getThreadState pid
@@ -240,7 +246,7 @@ addCh ch = do
   chid <- incChid 
   let map' = insert chid ch map
   putChanMap map'
-  chid
+  return chid
 
 -- Build a send message, incrementing the message Id.
 buildSendMsg :: Chid -> Int -> Comp r Msg
@@ -272,6 +278,7 @@ _getRecvCh ch = fmap snd4 (_getCh ch)
 -- Tag a channel as speculative
 setChTag :: Bool -> Chid -> Comp r ()
 setChTag bool chid = do
+  trace "Getting chan map" $ return ()
   map <- getChanMap
   putChanMap $ adjust (\(a,b,_,c) -> (a,b,bool,c)) chid map
 
@@ -288,14 +295,18 @@ sendAck chid msg = do
 
 recvMsg :: Chid -> Comp r Msg
 recvMsg chid = do
-  ch <- _getRecvCh chid
+  ch <- _getSendCh chid
   liftIO $ readChan ch 
 
-nbGetMsg :: Chid -> Maybe (Comp r Msg)
+nbGetMsg :: Chid -> Comp r (Maybe Msg)
 nbGetMsg chid = do
-  ch <- _getRecvCh chid
-  when (isEmptyChan ch) $ return Nothing
-  liftIO $ Just $ readChan ch
+  ch <- _getSendCh chid
+  t <- liftIO $ isEmptyChan ch
+  if t 
+    then return Nothing
+    else do 
+      r <- liftIO $ readChan ch
+      return $ Just r
 
 -- Receive an acknowlegement, on the receive channel.
 recvAck :: Chid -> Comp r Msg
@@ -304,12 +315,13 @@ recvAck chid = do
   liftIO $ readChan ch
 
 -- Push a continuation onto the stack.
-pushCont :: (() -> r) -> KType -> Comp r ()
+pushCont :: (FakeCont r) -> KType -> Comp r ()
 pushCont k ktype = do
+  trace "Pushing cont... " $ return ()
   stack <- getContStack
   putContStack $ push (k, ktype) stack
 
-popCont :: Comp r (() -> r)
+popCont :: Comp r (FakeCont r, KType)
 popCont = do
   st <- getContStack
   let (h, st) = pop st
@@ -318,17 +330,19 @@ popCont = do
 
 -- <s>TODO: Should runStateT with the same state, except the current
 -- thread's pid incremented.</s>
-runChild :: Comp r a -> Comp r (IO a)
-runChild c = do 
-  (pid, a, b, c) <- get
-  return $ runStateT c (pid+1, a, b, c)
+runChild :: GlobalState r -> (Int -> Int) -> Comp r r -> IO r
+runChild (pid, a,b,c) f k = evalStateT k (f pid, a, b, c)
 
 -- end of interface
 
+-- XXX: If a parent continues past a par, then Pids can repeat in the
+-- parent and children.
 par :: Show r => Proc r a -> Proc r a -> Proc r a
 par (Cont c1) (Cont c2) = Cont (\k -> do
-  let b1 = runChild (c1 k) -- runStateT (c1 k) (ppid+1, map)
-  let b2 = runChild (c2 k) --runStateT (c2 k) (ppid+2, map)
+  st <- get
+  let b1 = runChild st (+1) (c1 k) -- runStateT (c1 k) (ppid+1, map)
+  let b2 = runChild st (+2) (c2 k) --runStateT (c2 k) (ppid+2, map)
+  modifyPid (+2)
   liftIO $ runPar b1 b2)
 
 -- Still useful in a concurrent environment, but useless in true
@@ -339,7 +353,7 @@ yield = Cont (\k -> do
 
 -- <s>TODO: Alter to create a full duplex channel, init message IDs, etc.
 -- Should also mark as speculative if the current thread is.</s>
-newChan :: Proc r (Chid)
+newChan :: Proc r Chid
 newChan = Cont (\k -> do 
   sch <- liftIO CC.newChan
   rch <- liftIO CC.newChan
@@ -349,41 +363,56 @@ newChan = Cont (\k -> do
 -- XXX: I think callCC will work this way, but it might be interesting
 -- to look at how stabilizers could play a role here.
 send :: Chid -> Int -> Proc r ()
-send ch s = callCC $ \cc -> Cont (\k -> do 
+send ch s = Cont (\k -> do 
   -- <s>TODO: Lots of undefined methods. At this point, they're pretty much
   -- methods, given the way I'm using them is rather object oriented.
   -- TODO: Double check that these are the right data structure, i.e. the
   -- order of variables.</s>
+  trace "Sending..." $ return ()
   msg@(Send spec_s msgid_s p) <- buildSendMsg ch s
   sendMsg ch msg
+  trace "Sent! Getting acknowledgement ..." $ return ()
   (Acknowledge spec_a msgid_a) <- recvAck ch
+  trace "Acknowledged!" $ return ()
   --liftIO $ putStrLn ("Pid: " ++ (show pid) ++ " Sending: " ++ (show s))
   --liftIO $ writeChan ch $ msg
-  when (spec_s `or` spec_a) $ setChTag True ch
+  trace (show (spec_a || spec_s)) $ return ()
+  --when (spec_a || spec_s) $ setChTag True ch
+  trace "Passed checks" $ return ()
   -- XXX: Sanity crash
   when (msgid_s /= msgid_a) $ undefined
-  pushCont (\_ -> runProc (do send ch s; cc ())) $ Sent ch msgid_s
+  st <- get
+  pushCont (fakeCont st (runCont (send ch s) k)) $ Sent ch msgid_s
   k ());
   
 -- <s>TODO: Same as send.</s>
-recv :: Ch -> Proc r Int
-recv ch = callCC $ \cc -> Cont (\k -> do 
+recv :: Chid -> Proc r Int
+recv ch = Cont (\k -> do 
   (Send spec_s msgid_s p) <- recvMsg ch
+  trace "Received!" $ return ()
   ack@(Acknowledge spec_a msgid_a) <- buildAckMsg ch 
-  sendAck ack ch
-  when (spec_s `or` spec_a) setChTag True ch
+  sendAck ch ack
+  trace "Sent acknowledgment" $ return ()
+  trace (show (spec_a || spec_s)) $ return ()
+  --when (spec_a || spec_s) $ setChTag True ch
+  trace "Passed check" $ return ()
   -- XXX: Sanity crash
   when (msgid_s /= msgid_a) $ undefined
-  pushCont (\_ -> runProc $  do r <- recv ch; cc r) $ Sent ch msgid_a
+  st <- get
+  pushCont (fakeCont st (runCont (recv ch) k)) $ Sent ch msgid_a
   k p)
 
+fakeCont :: GlobalState r -> Comp r r -> (() -> IO r)
+fakeCont st exp =  (\_ -> evalStateT exp st)
+
 choose :: Proc r a -> Proc r a -> Proc r a
-choose (Cont c1) k2@(Cont c2) = callCC $ \cc -> Cont (\k -> do 
+choose (Cont c1) k2@(Cont c2) = Cont (\k -> do 
   -- XXX: This seems a little naive. We store the next choice, and
   -- always take the first one first. There feels like a little room for
   -- abstraction here.
   -- Unexpected behavior if we try to backtrack after the second choice.
-  pushCont (\_ -> runProc $ do r <- c2 k; cc r) $ Choose
+  st <- get
+  pushCont (fakeCont st (c2 k)) $ Choose
   setSpecTag True
   c1 k)
 --  st <- get
@@ -391,7 +420,7 @@ choose (Cont c1) k2@(Cont c2) = callCC $ \cc -> Cont (\k -> do
 --  liftIO $ return b1)
 
 -- <s>TODO: Implement</s>
-backToChoice :: Proc r (() -> r)
+backToChoice :: Comp r (FakeCont r)
 backToChoice = do
   (k, ktype) <- popCont
   case ktype of
@@ -400,6 +429,7 @@ backToChoice = do
     Sent chid msgid -> do 
       msg <- buildUnsendMsg msgid
       sendMsg chid msg
+      backToChoice
     Choose -> return k
 -- backToChoice = do
 --   pop a continuation.
@@ -412,55 +442,73 @@ backToChoice = do
 -- sending unsend/unrecv messages accordingly. At the choose statement,
 -- it should send a Continue message
 --
-backtrack :: Proc r a
+backtrack :: Proc r r
 backtrack = Cont (\_ -> do
-  (Cont c) <- backToChoice
-  c ())
+  c <- backToChoice
+  liftIO $ c ())
   --pid <- getPid
   --liftIO $ putStrLn ("Pid: " ++ (show pid) ++ " backtracking..")
   --liftIO $ return [])
   
 -- Pop continutations until we find the one with the message id we're
 -- looking for.
-backToMsgid :: Msgid -> Proc r (() -> r)
+backToMsgid :: Msgid -> Comp r (FakeCont r)
 backToMsgid msgid = do
   (c, ktype) <- popCont
   case ktype of
-    Send _ msgid_ | msgid == msgid_ -> return c
+    Sent _ msgid_ | msgid == msgid_ -> return c
     _ -> backToMsgid msgid
 
 -- Wait on a particular channel for more Unsend or a Continue
-waitForMsg :: Chid -> Proc r () -> Proc r ()
+waitForMsg :: Chid -> (FakeCont r) -> Comp r (FakeCont r)
 waitForMsg chid c = do
   msg <- recvMsg chid 
   case msg of
-    Continue -> c ()
+    Continue -> return $ c 
     Unsend msgid  -> do
       c <- backToMsgid msgid
       waitForMsg chid c
 
 -- Listen on all our speculative channels for either Continue or Unsend
 -- messages.
-listenForMsg :: [Chid] -> Proc r ()
-listenForMsg [] = return ()
+listenForMsg :: [Chid] -> Comp r (Maybe (FakeCont r))
+listenForMsg [] = return Nothing
 listenForMsg (x:xs) = do
   msg <- nbGetMsg x
   case msg of
     Just msg ->
       case msg of
-        Continue -> setChTag False x
+        Continue -> do
+          setChTag False x
+          listenForMsg xs
         Unsend msgid -> do
           c <- backToMsgid msgid
-          waitForMsg x c
+          c <- waitForMsg x c
+          return $ Just c
     Nothing -> listenForMsg xs
+ 
+while :: Bool -> a -> a
+while b a = 
+  if b 
+    then while b a
+    else a
 
-endProcess :: r -> Proc r a
-endProcess r = do
-  xs <- getSpecChans
-  when (null xs) $ return r
-  (Cont c1) <- listenForMsg xs
-  c1 ()
-  endProcess r
+-- Like pokemon, not the greek letter.
+mew f = f (mew f)
+
+endProcess :: r -> Proc r r
+endProcess r = Cont (\k ->
+  mew (\f -> do
+    xs <- getSpecChans
+    if (null xs) 
+      then k r
+      else do
+        res <- listenForMsg xs
+        case res of
+          Just c -> do
+            r <- liftIO $ c ()
+            k r
+          Nothing -> f))
   -- for each chid in our list of speculative channels:
   --   nonblocking check for a message:
   --   case:
@@ -497,7 +545,7 @@ wrapProc p block mvar = do
 wrapProcPrint :: Show r => IO r -> IO ()
 wrapProcPrint p = do
   r <- p
-  putStrLn r
+  putStrLn $ show r
 
 wrapProcRes :: IO r -> MVar r -> IO ()
 wrapProcRes p res = do
@@ -538,7 +586,7 @@ runPar k1 k2 = do
   takeMVar result
 
 runProc :: Show r => Proc r r -> IO r
-runProc p = runStateT (runCont p (\r -> return r)) 0
+runProc p = evalStateT (runCont p (\r -> return r)) (0, 0, M.empty, M.empty)
 
 -- All the tests have data returned in an unexpected order. This make
 -- sense in some of the tests, as the parallelism is non-deterministic as
@@ -556,18 +604,18 @@ runProc p = runStateT (runCont p (\r -> return r)) 0
 --
 --
 -- Expected: [1,2]
--- Result: [2,1] or [1,2]
+-- Result: [1,2]
 test1 :: Proc Int Int
 test1 = (par (return 1) (return 2))
 
 -- Expected: [3,1,2]
--- Results: [2,1,3]
+-- Results: [3,1,2]
 test2 :: Proc Int Int
 test2 = (par (do yield; (par (return 1) (return 2)))
              (return 3))
 
 -- Expected: [0,3]
--- Results: [0,3]
+-- Results: 
 test3 :: Proc Int Int
 test3 = do ch <- newChan
            (par
@@ -577,7 +625,7 @@ test3 = do ch <- newChan
                   return (x+1)))
 
 -- Expected: [1,0,11]
--- Results: [0,11,1]
+-- Results: [1]
 test4 :: Proc Int Int
 test4 = do ch <- newChan
            (foldr1 par
