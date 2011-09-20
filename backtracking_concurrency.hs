@@ -24,8 +24,8 @@ import qualified Data.Map as M
 import Data.Map (Map, adjust, insert)
 import List (delete)
 
---trace _ r = r
-trace = D.trace
+trace _ r = r
+--trace = D.trace
 
 -- Honestly, there's no Data.Stack?
 -- Quick stack implementation
@@ -249,8 +249,10 @@ addCh ch = do
 addSpecCh :: Chid -> Comp r ()
 addSpecCh ch = do
   chxs <- getSpecChans
+  if (elem ch chxs)
+    then return ()
+    else putSpecChans $ ch:chxs
   --trace ("Spec Chans: " ++ (show $ ch:chxs)) $ return ()
-  putSpecChans $ ch:chxs
 
 remSpecCh :: Chid -> Comp r ()
 remSpecCh ch = do
@@ -445,6 +447,15 @@ choose (Cont c1) k2@(Cont c2) = Cont (\k -> do
 --  b1 <- liftIO $ runStateT (c1 k) st
 --  liftIO $ return b1)
 
+mapSendContinue :: [Chid] -> Comp r ()
+mapSendContinue chs = do 
+  msg <- buildContinueMsg
+  mapM (\ch -> do
+    sendMsg ch msg
+    _ <- recvAck ch
+    return ()) chs
+  return ()
+
 -- <s>TODO: Implement</s>
 backToChoice :: [Chid] -> Comp r (FakeCont r)
 backToChoice xs = do
@@ -458,15 +469,14 @@ backToChoice xs = do
       trace "Sending unsend" $ return ()
       msg <- buildUnsendMsg msgid
       sendMsg chid msg
-      _ <- recvAck chid
-      --recvAck chid
-      trace "Got acknoledge for unsed" $ return ()
+      ack <- recvAck chid
+      trace ("Got acknowledge for unsend" ++  (show ack)) $ return ()
       backToChoice $ chid:xs
     Choose -> do
-      trace "Found choose k" $ return ()
-      msg <- buildContinueMsg 
-      foldr (\chid -> \_ -> do sendMsg chid msg; _ <- recvAck chid; return ()) (return ()) xs
+      trace ("Found choose k: " ++ (show xs)) $ return ()
+      mapSendContinue xs
       return k
+
 -- backToChoice = do
 --   pop a continuation.
 --   case:
@@ -521,9 +531,10 @@ waitForMsg chid c = do
 
 -- Listen on all our speculative channels for either Continue or Unsend
 -- messages.
-listenForMsg :: [Chid] -> Comp r (Maybe (FakeCont r))
-listenForMsg [] = return Nothing
-listenForMsg (x:xs) = do
+listenForMsg :: [Chid] -> Maybe (FakeCont r) -> Comp r (Maybe (FakeCont r))
+listenForMsg [] c = return c
+listenForMsg ls@(x:xs) c = do
+  trace ("listen " ++ show ls) $ return ()
   msg <- nbRecvMsg x
   case msg of
     Just msg' -> do
@@ -531,35 +542,57 @@ listenForMsg (x:xs) = do
       sendAck x ack
       case msg' of
         Continue -> do
+          xs <- getSpecChans
+          trace ("MEOW " ++ (show xs)) $ return ()
           trace ("Got continue on " ++ (show x)) $ return ()
-          remSpecCh x
-          setChTag False x
-          listenForMsg xs
+          remSpecCh x 
+          --setChTag False x
+          xs <- getSpecChans
+          trace ("After remove: " ++ show xs) $ return ()
+          listenForMsg xs c
         Unsend msgid -> do
           trace ("Got unsend on " ++ (show x)) $ return ()
           c <- backToMsgid x msgid
-          trace ("Got c.. waiting for continue" ++ (show msgid)) $ return ()
-          c <- waitForMsg x c
-          return $ Just c
-    Nothing -> listenForMsg (xs ++ [x])
+--          trace ("Got c.. waiting for continue" ++ (show msgid)) $ return ()
+--          c <- waitForMsg x c
+--          return $ Just c
+          listenForMsg (x:xs) $ Just c
+        _ -> trace (show msg') $ undefined
+    Nothing -> listenForMsg (xs) c
  
 -- Like the pokemon, not the greek letter.
 mew f = f (mew f)
 
+remChans :: [Chid] -> Comp a [()]
+remChans [] = return []
+remChans (x:xs) = do
+  remSpecCh x 
+  ls <- remChans xs
+  return $ () : ls
+
+endChoice :: r -> Proc r r
+endChoice r = Cont (\k -> do
+  chs <- getSpecChans
+  mapM (\ch -> remSpecCh ch) chs
+  mapSendContinue chs
+  k r)
+
 endProcess :: Show r => r -> Proc r r
 endProcess r = Cont (\k ->
-  trace ("Ending with: " ++ show r) $ 
-  mew (\f -> do
+  mew (\f -> \r -> do
     xs <- getSpecChans
+    trace ("endProcess: " ++ show xs) $ return ()
     if (null xs) 
-      then trace ("Leaving end process with: " ++ show r) $ k r
+      then do 
+        q <- r
+        trace ("Leaving end process with: " ++ show q) $ k q
       else do
-        msg <- listenForMsg xs
+        msg <- listenForMsg xs Nothing
         case msg of
-          Just c -> do
-            r <- liftIO $ c ()
-            k r
-          Nothing -> f))
+          Just c -> f $ liftIO $ c ()
+--            r <- liftIO $ (\r -> trace (show r) $ c r) ()
+--            (\r -> trace (show r) $ k r) r
+          Nothing -> f r)  $ return r)
   -- for each chid in our list of speculative channels:
   --   nonblocking check for a message:
   --   case:
@@ -685,8 +718,19 @@ test4 = do ch <- newChan
                   return 1,
                   do send ch 10; yield; y <- recv ch2; return y])
 
+test4' :: Proc Int Int
+test4' = do 
+  x <- choose (return 1) (return 2)
+  case x of 
+    2 -> do 
+      y <- choose (return 3) (return 4)
+      case y of
+        3 -> backtrack
+        4 -> endProcess y
+    1 -> backtrack 
+  
 -- Expected: [10, 1]
--- Results: [0]
+-- Results: [1, 10]
 --
 -- <s>There's a race condition caused by the channel, it seems. We can
 -- occasionally pull off the x we sent before the other thread has had
@@ -714,7 +758,7 @@ test5 = do ch1 <- newChan
                 y <- recv ch2
                 if y == 0
                   then backtrack
-                  else endProcess y)
+                  else endChoice y)
             (do a <- recv ch1
                 if a == 1
                   then do send ch2 0; endProcess 0
