@@ -1,10 +1,12 @@
+{-# LANGUAGE CPP #-}
+
 -- Note:
 --   TODO tags indicate (shockingly) something that needs to be done
 --   XXX tags indicate comments, notes to self, observations, or
 --   thoughts that are not tasks, but things that need to be considered
 --   or things to be aware of.
 --
--- I've taken up not deleting TODO and XXX tags, as they might be useful as
+-- I've taken up not deleting pase comments, as they might be useful as
 -- notes if/when I have to write about this. Instead, completed ones are
 -- surrounded by HTML strike tags (<s></s>) 
 --
@@ -12,20 +14,43 @@
 -- need a machine with at least 2 cores to take advantage of this.
 
 -- <s>However, due to some race conditions which exist right now, it's
--- actually preferablly to test this without parallelism, instead
--- allowing ghc to use it's internal scheduler for concurency.</s>
+-- actually preferably to test this without parallelism, instead
+-- allowing ghc to use it's internal scheduler for concurrency.</s>
 --
+module Reversible.Base (
+    par, 
+    send, 
+    recv, 
+    newChan, 
+    runProc, 
+    choose, 
+    backtrack, 
+    endProcess,
+    endChoice,
+    yield,
+    Proc
+  ) where
+
 import Control.Concurrent hiding (yield,newChan)
 import Control.Monad.Cont
 import qualified Control.Concurrent as CC (yield,newChan)
 import Control.Monad.State
-import qualified Debug.Trace as D
+
+#ifdef DEBUG
+
+import Debug.Trace
+
+#endif
+
 import qualified Data.Map as M 
 import Data.Map (Map, adjust, insert)
 import List (delete)
 
+#ifndef DEBUG
+
 trace _ r = r
---trace = D.trace
+
+#endif
 
 -- Honestly, there's no Data.Stack?
 -- Quick stack implementation
@@ -670,96 +695,7 @@ runPar k1 k2 = do
   takeMVar result
 
 runProc :: Show r => Proc r r -> IO r
-runProc p = evalStateT (runCont p (\r -> return r)) (0, 0, (False, empty, []), M.empty)
+runProc p = evalStateT 
+  (runCont p (\r -> return r)) 
+  (0, 0, (False, empty, []), M.empty)
 
--- All the tests have data returned in an unexpected order. This make
--- sense in some of the tests, as the parallelism is non-deterministic as
--- to which one will finish first. The tests with explicit yields,
--- however, are slightly more interesting. While in a concurrent
--- environment, without true parallelism, the yield would force one
--- thread to wait, in a true parallel environment, with enough cores for
--- all threads, the yield is useless. 
---
--- Unfortunately, this can cause a race condition in some of the
--- assumptions we make, for instance, in test5. We assume that, having
--- yielded, the second thread will receive the value we sent before we
--- manage to receive. This might not be the case, however, if the first
--- thread is running faster than the second thread.
---
---
--- Expected: [1,2]
--- Result: [1,2]
-test1 :: Proc Int Int
-test1 = (par (return 1) (return 2))
-
--- Expected: [3,1,2]
--- Results: [3,1,2]
-test2 :: Proc Int Int
-test2 = (par (do yield; (par (return 1) (return 2)))
-             (return 3))
-
--- Expected: [0,3]
--- Results: [0,3]
-test3 :: Proc Int Int
-test3 = do ch <- newChan
-           (par
-              (do send ch 2
-                  return 0)
-              (do x <- recv ch
-                  return (x+1)))
-
--- Expected: [1,0,11]
--- Results: [1,0,11]
-test4 :: Proc Int Int
-test4 = do ch <- newChan
-           ch2 <- newChan
-           (foldr1 par
-                 [do x <- recv ch; send ch2 (x+1); return 0,
-                  return 1,
-                  do send ch 10; yield; y <- recv ch2; return y])
-
-test4' :: Proc Int Int
-test4' = do 
-  x <- choose (return 1) (return 2)
-  case x of 
-    2 -> do 
-      y <- choose (return 3) (return 4)
-      case y of
-        3 -> backtrack
-        4 -> endProcess y
-    1 -> backtrack 
-  
--- Expected: [10, 1]
--- Results: [1, 10]
---
--- <s>There's a race condition caused by the channel, it seems. We can
--- occasionally pull off the x we sent before the other thread has had
--- a chance to receive it, despite the yield. It's interesting that
--- we're both able to pull the value off the channel simultaneously,
--- however.
---
--- The only solution to this issue I can see is named channels.
---
--- What's more curious is the result we normally get, being [1,1,10]. I
--- haven't figured out why we get two 1's. Maybe it's due to both
--- duplicated continutations and true parallelism.</s>
---
--- XXX: I can't figure out how to get the Cont monad's return to do what
--- I want, as I have to give a function of type r -> IO r, but I need a
--- function r -> Proc r a. So... we return with endProcess, and return
--- from there after checking for backtracking messages and such
-test5 :: Proc Int Int
-test5 = do ch1 <- newChan
-           ch2 <- newChan
-           par
-            (do x <- choose (return 1) (return 2)
-                send ch1 x
-                yield
-                y <- recv ch2
-                if y == 0
-                  then backtrack
-                  else endChoice y)
-            (do a <- recv ch1
-                if a == 1
-                  then do send ch2 0; endProcess 0
-                  else do send ch2 1; endProcess 10)
