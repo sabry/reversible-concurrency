@@ -1,13 +1,19 @@
 -- Defines a zero buffer channel, which can store a value, and three
 -- logical times.
 module Reversible.Channel (
+  send,
+  recv,
+  newChannel,
+  newEmptyChannel,
+  Time,
+  Channel,
+  TimeStamp
   ) where
   import Control.Monad.STM
   import Control.Concurrent.STM.TMVar
+  import Reversible.LogicalTime 
 
-  type Time = Int
-
-  data TimeStamp = Times { 
+  data TimeStamp = TimeStamp { 
     senderTime :: TMVar Time,
     receiverTime :: TMVar Time,
     channelTime :: TMVar Time
@@ -16,8 +22,8 @@ module Reversible.Channel (
   data Channel a = Channel {
     channelValue :: TMVar a,
     channelTimeStamp :: TimeStamp,
-    channelRecvAck :: TMVar ()
-    channelSyncAck :: TMvar ()
+    channelRecvAck :: TMVar (),
+    channelSyncAck :: TMVar ()
   }
 
   -- To read off the channel, first we read the value. Next, we get the
@@ -26,62 +32,63 @@ module Reversible.Channel (
   -- channel. Then, we set the acknowledge tag so the sender can updat
   -- the times. Once the sync tag is set, we return the value and the
   -- time.
-  readCh :: Time -> Channel a -> STM (a, Time)
-  readCh time ch = do
+  recv :: Time -> Channel a -> STM (a, Time)
+  recv time ch = do
     val <- readTMVar $ channelValue ch
 
     let timeStamp = channelTimeStamp ch
-    recvT <- takeTMVar $ receiverTime timeStamp 
-    chT <- takeTMVar $ channelTime timeStamp 
-    let newT = (+1) $ foldr1 max [time,recvT,chT]
-    putTMVar (receiverTime timeStamp)  newT
-    putTMVar (channelTime timeStamp) newT
+    rTime <- takeTMVar $ receiverTime timeStamp 
+    cTime <- takeTMVar $ channelTime timeStamp 
+    let nTime = foldr1 max [time,rTime,cTime]
+    putTMVar (receiverTime timeStamp)  nTime
+    putTMVar (channelTime timeStamp) nTime
 
-    putTMVar (channelAck ch) ()
+    putTMVar (channelRecvAck ch) ()
     takeTMVar $ channelSyncAck ch
+    time <- readTMVar $ receiverTime timeStamp
+    return (val, time)
 
-    return (a, readTMVar $ receiverTime timeStamp)
+  -- Write the value to the channel, then wait for an acknowledgment.
+  -- After that, get the max of the incoming time and the channel time
+  -- (which should be the same as the receiver's time as well), add 1 to
+  -- it, and update all the times. Then, set the sync tag.
+  send :: Time -> Channel a -> a -> STM Time
+  send time ch val = do 
+    putTMVar (channelValue ch) val
 
-  writeCh :: Time -> TMVar (a, TimeStamp) -> a -> STM (a, Time)
-  writeCh time ch val = do 
-    putTMVar $ channelValue ch
+    takeTMVar $ channelRecvAck ch
 
-    takeTMVar $ channelAck ch
+    let timeStamp = channelTimeStamp ch
+    cTime <- takeTMVar $ channelTime timeStamp
+    let nTime = incTime $ max time cTime
+    putTMVar (receiverTime timeStamp) nTime
+    putTMVar (channelTime timeStamp) nTime
+    putTMVar (senderTime timeStamp) nTime
 
-    
+    putTMVar (channelSyncAck ch) ()
 
-  newChannel :: a -> Channel a
-  newChannel a = newTMVar a
+    return nTime
+
+  _newChannel :: STM (TMVar a) -> STM (Channel a)
+  _newChannel f =  do 
+    val <- f
+    sTime <- newTMVar $ baseTime
+    rTime <- newTMVar $ baseTime
+    cTime <- newTMVar $ baseTime
+    let timeStamp = TimeStamp {
+      senderTime = sTime, 
+      receiverTime = rTime, 
+      channelTime = cTime}
+    recv <- newEmptyTMVar
+    sync <- newEmptyTMVar
+    return $ Channel {
+      channelValue = val, 
+      channelTimeStamp = timeStamp,
+      channelRecvAck = recv, 
+      channelSyncAck = sync}
+
+  newChannel :: a -> STM (Channel a)
+  newChannel a = _newChannel $ newTMVar a
 
   newEmptyChannel :: STM (Channel a)
-  newEmptyChannel = newEmptyTMVar 
-
-  sendChannel :: Channel a -> STM ()
-  sendChannel ch = do
-    var <- ch
-    readCh var
-
-  recvChannel :: Channel a -> STM a
-
-
-
-
-
-  getValue :: Channel a -> STM a
-  getValue ch = fmap fst (fmap readCh ch)
-
-  getInfo :: Channel a b -> STM b
-  getInfo ch = fmap snd (fmap readCh ch)
-
-  modifyChannel :: Channel a b -> ((a, b) -> (a, b)) -> STM ()
-  modifyChannel ch f = do
-    var <- ch
-    pair <- readCh var
-    writeCh var $ f pair
-
-  setValue :: Channel a b -> a -> STM ()
-  setValue ch val = modifyChannel ch (\ (_,b) -> (val, b))
-
-  setInfo :: Channel a b -> b -> STM ()
-  setInfo ch info = modifyChannel ch (\ (a,_) -> (a,info))
-
+  newEmptyChannel = _newChannel newEmptyTMVar
