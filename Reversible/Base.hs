@@ -43,26 +43,11 @@ module Reversible.Base (
   import qualified Data.Map as M 
   import Data.Map (Map, adjust, insert)
   import List (delete)
+  import Reversible.Stack
 
 #ifndef DEBUG
   trace _ r = r
 #endif
-
-  -- Honestly, there's no Data.Stack?
-  -- Quick stack implementation
-  type Stack a = [a]
-  empty :: Stack a
-  empty = []
-  isEmpty :: Stack a -> Bool
-  isEmpty = null
-  push :: a -> Stack a -> Stack a
-  push = (:)
-  top :: Stack a -> a
-  top = head
-  pop :: Stack a -> (a,Stack a)
-  pop (s:ss) = (s,ss)
-
-  -- end stack implementation
 
   type Pid = Int -- ID of a process
   type Msgid = Int -- ID for a message on a channel.
