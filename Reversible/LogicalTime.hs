@@ -5,10 +5,16 @@ module Reversible.LogicalTime (
   incTime
   ) where
 
-  type Time = Int
+  data Time = Zero 
+            | T Int
+            | Max deriving (Ord, Eq, Show, Read)
   
   baseTime :: Time
-  baseTime = -1
+  baseTime = Zero
 
   incTime :: Time -> Time
-  incTime = (+1)
+  incTime Zero = T 0
+  incTime (T t) = T (t+1)
+
+  maxTime :: Time
+  maxTime = Max
