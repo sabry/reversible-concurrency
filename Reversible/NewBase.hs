@@ -54,17 +54,19 @@ module Reversible.NewBase (
 
   -- The types for processes
   
-  data Checkpoint r = CheckPoint {
+  data CheckPoint r = CheckPoint {
     checkpointTime :: Time,
-    checkpointSendChs :: [ChannelHash],
-    checkpointRecvChs :: [ChannelHash],
+    checkpointSendChs :: [ChannelHash Int],
+    checkpointRecvChs :: [ChannelHash Int],
     checkpointK :: () -> IO r
   }
+
+  type KDeq r =  BankersDequeue (CheckPoint r)
 
   data ThreadState r = ThreadState {
     threadTime :: Time,
     lastChoice :: Time,
-    kDequeue :: BankersDequeue (Checkpoint r),
+    kDequeue :: KDeq r,
     sendCh :: [Channel Int],
     recvCh :: [Channel Int]
   } 
@@ -106,14 +108,20 @@ module Reversible.NewBase (
                  sendCh = (sendCh st), 
                  recvCh = (recvCh st)})
 
-  pushCheckpoint :: (() -> IO r) -> Comp r ()
-  pushCheckpoint k = do
+  getSendCh :: Comp r [Channel Int]
+  getSendCh = sendCh <$> get
+
+  getRecvCh :: Comp r [Channel Int]
+  getRecvCh = recvCh <$> get
+
+  pushCheckPoint :: (() -> IO r) -> Comp r ()
+  pushCheckPoint k = do
     time <- getTime
     deq <- getDeque 
-    sChs <- mapM (liftIO saveChannel) getSendCh
-    rChs <- mapM (liftIO saveChannel) getRecvCh
+    sChs <- (mapM (liftIO . saveChannel)) =<< getSendCh
+    rChs <- (mapM (liftIO . saveChannel)) =<< getRecvCh
     putDeque $ pushFront deq 
-      Checkpoint {
+      CheckPoint {
         checkpointTime = time,
         checkpointSendChs = sChs,
         checkpointRecvChs = rChs,
@@ -127,17 +135,28 @@ module Reversible.NewBase (
   runChild :: ThreadState r -> (ThreadState r -> ThreadState r) -> Comp r r -> IO r
   runChild st f k = evalStateT k $ f st
 
+  newThreadState :: () -> ThreadState r 
+  newThreadState _ =  
+    ThreadState {
+      threadTime = baseTime, 
+      lastChoice = baseTime,
+      kDequeue = pushFront empty 
+        CheckPoint {
+          checkpointTime = baseTime,
+          checkpointSendChs = [],
+          checkpointRecvChs = [],
+          checkpointK = (\_ -> do 
+              _ <- killThread <$> myThreadId
+              return undefined)
+        },
+      sendCh = [],
+      recvCh = []
+    }
+
   par :: Show r => Proc r a -> Proc r a -> Proc r a
   par (Cont c1) (Cont c2) = Cont (\k -> do
-    let baseState = \_ -> (ThreadState {threadTime = baseTime, 
-                                        lastChoice = baseTime,
-                                        kDequeue = pushFront empty (\_ -> do 
-                                          _ <- killThread <$> myThreadId
-                                          return undefined),
-                                        sendCh = [],
-                                        recvCh = []})
-    let b1 = runChild (baseState ()) id (c1 k)
-    let b2 = runChild (baseState ()) id (c2 k)
+    let b1 = runChild (newThreadState ()) id (c1 k)
+    let b2 = runChild (newThreadState ()) id (c2 k)
     liftIO $ runPar b1 b2)
 
   yield :: Proc r ()
@@ -169,11 +188,12 @@ module Reversible.NewBase (
 
   choose :: Proc r a -> Proc r a -> Proc r a
   choose (Cont c1) k2@(Cont c2) = Cont (\k -> do 
-    pushCheckpoint $ (fakeCont <$> get) (c2 k)
+    st <- get
+    pushCheckPoint $ fakeCont st (c2 k)
     -- Note, since we evaled c2 already, it's last choice is the
     -- previous choice point, not this one. However, in c1, the choice
     -- point is changed to be this one.
-    putLastChoice <$> getTime
+    putLastChoice =<< getTime
     c1 k)
 
   backToChoice = undefined
