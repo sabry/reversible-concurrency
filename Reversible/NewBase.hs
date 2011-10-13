@@ -176,6 +176,8 @@ module Reversible.NewBase (
     putLastChoice <$> getTime
     c1 k)
 
+  backToChoice = undefined
+
   backtrack :: Proc r r
   backtrack = Cont (\_ -> do
     c <- backToChoice []

@@ -15,7 +15,6 @@ module Reversible.Channel (
 
   import Control.Concurrent.MVar
   import Reversible.LogicalTime 
-  import Control.Applicative
 
   data TimeStamp = TimeStamp { 
     senderTime :: MVar Time,
@@ -47,9 +46,9 @@ module Reversible.Channel (
 
   copyTimeStamp :: TimeStamp -> TimeStamp -> IO ()
   copyTimeStamp t1 t2 = do
-    (putMVar (senderTime t2)) <$> (readMVar $ senderTime t1)
-    (putMVar (receiverTime t2)) <$> (readMVar $ receiverTime t1)
-    (putMVar (channelTime t2)) <$> (readMVar $ channelTime t1)
+    (putMVar $ senderTime t2) =<< (readMVar $ senderTime t1)
+    (putMVar $ receiverTime t2) =<< (readMVar $ receiverTime t1)
+    (putMVar $ channelTime t2) =<< (readMVar $ channelTime t1)
 
   data Channel a = Channel {
     channelValue :: MVar a,
@@ -70,11 +69,12 @@ module Reversible.Channel (
   unhashChannel (val, hash) = do
     vVar <- newMVar val
     rVar <- newEmptyMVar
+    timestamp <- unhashTimeStamp hash
     sVar <- newEmptyMVar
     return $ 
       Channel {
         channelValue = vVar,
-        channelTimeStamp = unhashTimeStamp hash,
+        channelTimeStamp = timestamp,
         channelRecvAck = rVar,
         channelSyncAck = sVar
       }
@@ -82,7 +82,7 @@ module Reversible.Channel (
   -- Copies the contents of channel 1 into channel 2
   copyChannel :: Channel a -> Channel a -> IO ()
   copyChannel ch1 ch2 = do
-    putMVar (channelValue ch2) <$> readMVar $ channelValue ch1
+    (putMVar $ channelValue ch2) =<< (readMVar $ channelValue ch1)
     copyTimeStamp (channelTimeStamp ch1) (channelTimeStamp ch2)
 
   -- To read off the channel, first we read the value. Next, we get the
