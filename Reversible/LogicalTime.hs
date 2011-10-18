@@ -15,6 +15,7 @@ module Reversible.LogicalTime (
   incTime :: Time -> Time
   incTime Zero = T 0
   incTime (T t) = T (t+1)
+  incTime Max = undefined
 
   maxTime :: Time
   maxTime = Max

@@ -2,7 +2,7 @@
 {-# LANGUAGE BangPatterns #-}
 -- Test module. Exports test several test suites, each testing various
 -- levels of functionality.
-module Reversible.NewTest (markSub0) where
+module Reversible.NewTest (markSub0, mark0) where
 
 import Reversible.NewBase
 import Control.Monad
@@ -22,7 +22,7 @@ markSub0 = runTests [test1, test2, test3, test4]
 -- without any communication in a stable region (i.e. between choose
 -- and backtrack)
 --
---mark0 = runTests [testm0_1, testm0_2]
+mark0 = runTests [testm0_1, testm0_2]
 
 -- Mark 1 tests the ability for threads to backtrack with a single
 -- choose point globally.
@@ -79,37 +79,39 @@ test4 = do ch <- newChan
                   do send ch 10; yield; y <- recv ch2; return y])
 
 
--- Expected result: 4
--- Reult: 4
--- testm0_1 :: Proc Int Int
--- testm0_1 = do 
---   x <- choose (return 1) (return 2)
---   case x of 
---     2 -> do 
---       y <- choose (return 3) (return 4)
---       case y of
---         3 -> backtrack
---         4 -> endProcess y
---     1 -> backtrack 
---   
--- testm0_2 :: Proc Int Int
--- testm0_2 = par
---   (do x <- choose (return 1) (return 2)
---       case x of 
---         2 -> do
---           y <- choose (return 3) (return 4)
---           case y of
---             3 -> backtrack
---             4 -> endProcess y
---         1 -> backtrack) 
---   (do x <- choose (return 3) (return 4)
---       case x of 
---         4 -> do 
---           y <- choose (return 1) (return 2)
---           case y of
---             1 -> backtrack
---             2 -> endProcess y
---         3 -> backtrack)
+--Expected result: 4
+--Reult: 4
+testm0_1 :: Proc Int Int
+testm0_1 = do 
+  x <- choose (return 1) (return 2)
+  case x of 
+    2 -> do 
+      y <- choose (return 3) (return 4)
+      case y of
+        3 -> backtrack
+        4 -> return y
+    1 -> backtrack 
+  
+-- Expected result: [4,2]
+-- Result: [4,2]
+testm0_2 :: Proc Int Int
+testm0_2 = par
+  (do x <- choose (return 1) (return 2)
+      case x of 
+        2 -> do
+          y <- choose (return 3) (return 4)
+          case y of
+            3 -> backtrack
+            4 -> return y
+        1 -> backtrack) 
+  (do x <- choose (return 3) (return 4)
+      case x of 
+        4 -> do 
+          y <- choose (return 1) (return 2)
+          case y of
+            1 -> backtrack
+            2 -> return y
+        3 -> backtrack)
 
 -- Expected: [10, 1]
 -- Results: [1, 10]
