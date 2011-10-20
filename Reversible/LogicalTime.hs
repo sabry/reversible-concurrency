@@ -2,7 +2,8 @@
 module Reversible.LogicalTime (
   Time,
   baseTime,
-  incTime
+  incTime,
+  maxTime
   ) where
 
   data Time = Zero 

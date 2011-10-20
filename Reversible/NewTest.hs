@@ -27,7 +27,7 @@ mark0 = runTests [testm0_1, testm0_2]
 -- Mark 1 tests the ability for threads to backtrack with a single
 -- choose point globally.
 --
---mark1 = runTests [testm1_1, testm1_2]
+mark1 = runTests [testm1_1,testm1_2]
 
 -- The following is no longer the case for most of these tests, as we
 -- have synchronous communication.
@@ -69,7 +69,7 @@ test3 = do ch <- newChan
                   return (x+1)))
 
 -- Expected: [1,0,11]
--- Results: [1,0,11]
+-- Results: [1 diverge
 test4 :: Proc Int Int
 test4 = do ch <- newChan
            ch2 <- newChan
@@ -132,42 +132,42 @@ testm0_2 = par
 -- I want, as I have to give a function of type r -> IO r, but I need a
 -- function r -> Proc r a. So... we return with endProcess, and return
 -- from there after checking for backtracking messages and such
--- testm1_1 :: Proc Int Int
--- testm1_1 = do ch1 <- newChan
---               ch2 <- newChan
---               par
---                 (do x <- choose (return 1) (return 2)
---                     send ch1 x
---                     yield
---                     y <- recv ch2
---                     if y == 0
---                       then backtrack
---                       else endChoice y)
---                 (do a <- recv ch1
---                     if a == 1
---                       then do send ch2 0; endProcess 0
---                       else do send ch2 1; endProcess 10)
--- 
--- testm1_2 :: Proc Int Int
--- testm1_2 = do
---   ch1 <- newChan
---   ch2 <- newChan
---   ch3 <- newChan
---   ch4 <- newChan
---   (foldr1 par
---    [do x <- choose (return 1) (return 2)
---        send ch1 x
---        send ch3 x
---        y <- recv ch2
---        z <- recv ch4
---        if z == y
---         then endProcess y
---         else backtrack,
---    do x <- recv ch1
---       if x == 1
---         then do send 2 ch2; endProcess x
---         else do send 0 ch2; endProcess x,
---    do x <- recv ch3
---       if x == 2
---         then do send 0 ch4; endProcess x
---         else do send 5 ch4; endProcess x])
+testm1_1 :: Proc Int Int
+testm1_1 = do ch1 <- newChan
+              ch2 <- newChan
+              par
+                (do x <- choose (return 1) (return 2)
+                    send ch1 x
+                    yield
+                    y <- recv ch2
+                    if y == 0
+                      then backtrack
+                      else endProcess y)
+                (do a <- recv ch1
+                    if a == 1
+                      then do send ch2 0; endProcess 0
+                      else do send ch2 1; endProcess 10)
+
+testm1_2 :: Proc Int Int
+testm1_2 = do
+  ch1 <- newChan
+  ch2 <- newChan
+  ch3 <- newChan
+  ch4 <- newChan
+  (foldr1 par
+   [do x <- choose (return 1) (return 2)
+       send ch1 x
+       send ch3 x
+       y <- recv ch2
+       z <- recv ch4
+       if z == y
+        then endProcess y
+        else backtrack,
+   do x <- recv ch1
+      if x == 1
+        then do send ch2 2; endProcess x
+        else do send ch2 0; endProcess x,
+   do x <- recv ch3
+      if x == 2
+        then do send ch4 0; endProcess x
+        else do send ch4 5; endProcess x])

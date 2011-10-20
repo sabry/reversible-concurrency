@@ -33,7 +33,7 @@ module Reversible.NewBase (
   runProc,
   choose,
   backtrack,
---  endProcess,
+  endProcess,
 --  endChoice,
   yield,
   Proc
@@ -56,7 +56,7 @@ module Reversible.NewBase (
   -- We store continuations in a dequeue, allowing it to act like a
   -- stack, and to be garbage collected from the bottom when we
   -- implement that.
-  import Data.Dequeue
+  import Data.Dequeue hiding (null)
 
   -- So I can use <$>
   import Control.Applicative hiding (empty)
@@ -92,7 +92,7 @@ module Reversible.NewBase (
 
   type Comp r a = StateT (ThreadState r) IO a
   type Proc r a = Cont (Comp r r) a
-  
+
   -- interface methods
   getTime :: Comp r Time 
   getTime = threadTime <$> get
@@ -290,13 +290,57 @@ module Reversible.NewBase (
              putSendCh $ sendChs
              putRecvCh $ recvChs
              return $ checkpointK chkp             
-
       GT -> timeTravel time
        
   backtrack :: Proc r r
   backtrack = Cont (\_ -> do
     c <- timeTravel =<< getLastChoice
     liftIO $ c ())
+
+  observeChannels :: r -> Comp r r
+  observeChannels r = do
+    -- If any channel time is set to maxTime, then the sender has
+    -- entered endProcess.
+    rChs <- liftIO . filterM (\ch -> do
+      val <- readMVar $ channelTime $ channelTimeStamp ch
+      return $ val /= maxTime) =<< getRecvCh
+    putRecvCh rChs
+    if null rChs
+      -- Once our receive list is null, all our neighbors have finished,
+      -- so we return the result.
+      then return r
+      else do
+        -- Otherwise, we look at each channel, and compare the channel
+        -- time to our time. If the channel time is less than our time,
+        -- the channel has backtracked.
+        m <- foldM (\m ch ->
+          case m of 
+            Nothing -> do
+              ourTime <- getTime
+              cTime <- liftIO $ readMVar $ channelTime $
+                channelTimeStamp ch 
+              if cTime < ourTime 
+                then return $ Just ch
+                else return Nothing
+            Just mch -> return m) Nothing rChs
+        case m of 
+          -- So we backtrack too.
+          Just ch -> do
+            time <- liftIO $ readMVar $ channelTime $ channelTimeStamp ch
+            k <- timeTravel time
+            liftIO $ k ()
+          -- Otherwise, repeat until our neighbors finish
+          Nothing -> observeChannels r
+
+  endProcess :: Show r => r -> Proc r r
+  endProcess r = Cont (\k -> do
+    -- Set the channel time to maximum for all sendChs. We leave the
+    -- time alone in our thread state, as we'll need it for comparison.
+    sChs <- getSendCh
+    liftIO $ mapM_ (\ch -> do
+      let timestamp = channelTimeStamp ch
+      modifyMVar_ (channelTime timestamp) (\_ -> return maxTime)) sChs
+    k =<< observeChannels r)
 
   -- Run 
   runProc :: Proc r r -> IO r

@@ -7,6 +7,11 @@ module Reversible.Channel (
   newEmptyChannel,
   Time,
   Channel,
+  -- these 4 methods should not be exposed, but for now...
+  channelTimeStamp,
+  senderTime,
+  receiverTime,
+  channelTime,
   TimeStamp,
   ChannelHash,
   saveChannel,
@@ -44,11 +49,12 @@ module Reversible.Channel (
         channelTime = cVar
       }
 
+  -- Copy t1 into t2
   copyTimeStamp :: TimeStamp -> TimeStamp -> IO ()
   copyTimeStamp t1 t2 = do
-    (putMVar $ senderTime t2) =<< (readMVar $ senderTime t1)
-    (putMVar $ receiverTime t2) =<< (readMVar $ receiverTime t1)
-    (putMVar $ channelTime t2) =<< (readMVar $ channelTime t1)
+    modifyMVar_ (senderTime t2) $ \_ -> (readMVar $ senderTime t1) 
+    modifyMVar_ (receiverTime t2) $ \_ -> (readMVar $ receiverTime t1) 
+    modifyMVar_ (channelTime t2) $ \_ -> (readMVar $ channelTime t1) 
 
   data Channel a = Channel {
     channelValue :: MVar a,
@@ -57,17 +63,27 @@ module Reversible.Channel (
     channelSyncAck :: MVar ()
   }
   
-  type ChannelHash a = (a, TimeStampHash)
+--  type ChannelHash a = (Maybe a, TimeStampHash)
+  type ChannelHash a = TimeStampHash
 
   hashChannel :: Channel a -> IO (ChannelHash a)
-  hashChannel ch = do
-    val <- readMVar $ channelValue ch  
-    hash <- hashTimeStamp $ channelTimeStamp ch
-    return (val, hash)
+  hashChannel ch = hashTimeStamp $ channelTimeStamp ch
+    -- Wait, these are zero buffer channels. The only thing we need to
+    -- hash is the timestamp....
+--     val <- tryTakeMVar $ channelValue ch  
+--     case val of
+--       Nothing -> return ()
+--       Just v -> putMVar (channelValue ch) v
+--     hash <- hashTimeStamp $ channelTimeStamp ch
+--     return (val, hash)
   
   unhashChannel :: ChannelHash a -> IO (Channel a)
-  unhashChannel (val, hash) = do
-    vVar <- newMVar val
+  unhashChannel hash = do
+  -- Remember, zero buffer channel
+--    vVar <- case val of 
+--             Nothing -> newEmptyMVar
+--             Just val -> newMVar val
+    vVar <- newEmptyMVar
     rVar <- newEmptyMVar
     timestamp <- unhashTimeStamp hash
     sVar <- newEmptyMVar
@@ -82,7 +98,13 @@ module Reversible.Channel (
   -- Copies the contents of channel 1 into channel 2
   copyChannel :: Channel a -> Channel a -> IO ()
   copyChannel ch1 ch2 = do
-    (putMVar $ channelValue ch2) =<< (readMVar $ channelValue ch1)
+  -- Remember, zero buffer channel
+--    mval <- tryTakeMVar $ channelValue ch1
+--    case mval of
+--      Nothing -> do tryTakeMVar $ channelValue ch2; return ()
+--      Just v -> do
+--        tryTakeMVar $ channelValue ch2
+--        putMVar (channelValue ch2) v
     copyTimeStamp (channelTimeStamp ch1) (channelTimeStamp ch2)
 
   -- To read off the channel, first we read the value. Next, we get the
@@ -96,13 +118,14 @@ module Reversible.Channel (
     val <- takeMVar $ channelValue ch
 
     let timeStamp = channelTimeStamp ch
-    rTime <- takeMVar $ receiverTime timeStamp 
+    --rTime <- takeMVar $ receiverTime timeStamp 
     cTime <- takeMVar $ channelTime timeStamp 
-    let nTime = foldr1 max [time,rTime,cTime]
-    putMVar (receiverTime timeStamp)  nTime
-    putMVar (channelTime timeStamp) nTime
+    --let nTime = max time cTime
+    --putMVar (receiverTime timeStamp)  nTime
+    putMVar (channelTime timeStamp) $ max time cTime
 
     putMVar (channelRecvAck ch) ()
+
     takeMVar $ channelSyncAck ch
     time <- readMVar $ receiverTime timeStamp
     return (val, time)
@@ -119,13 +142,13 @@ module Reversible.Channel (
 
     let timeStamp = channelTimeStamp ch
     cTime <- takeMVar $ channelTime timeStamp
-    takeMVar $ receiverTime timeStamp
-    takeMVar $ senderTime timeStamp
+    --_ <- takeMVar $ receiverTime timeStamp
+    --_ <- takeMVar $ senderTime timeStamp
 
     let nTime = incTime $ max time cTime
-    putMVar (receiverTime timeStamp) nTime
     putMVar (channelTime timeStamp) nTime
-    putMVar (senderTime timeStamp) nTime
+    modifyMVar_ (receiverTime timeStamp) (\_ -> return nTime)
+    modifyMVar_ (senderTime timeStamp) (\_ -> return nTime)
 
     putMVar (channelSyncAck ch) ()
 
@@ -134,9 +157,9 @@ module Reversible.Channel (
   _newChannel :: IO (MVar a) -> IO (Channel a)
   _newChannel f =  do 
     val <- f
-    sTime <- newMVar $ baseTime
-    rTime <- newMVar $ baseTime
-    cTime <- newMVar $ baseTime
+    sTime <- newMVar baseTime
+    rTime <- newMVar baseTime
+    cTime <- newMVar baseTime
     let timeStamp = TimeStamp {
       senderTime = sTime, 
       receiverTime = rTime, 
