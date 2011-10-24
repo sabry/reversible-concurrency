@@ -20,6 +20,7 @@ module Reversible.Channel (
 
   import Control.Concurrent.MVar
   import Reversible.LogicalTime 
+  import Reversible.Debug
 
   data TimeStamp = TimeStamp { 
     senderTime :: MVar Time,
@@ -115,7 +116,12 @@ module Reversible.Channel (
   -- time.
   recv :: Time -> Channel a -> IO (a, Time)
   recv time ch = do
+
+    traceM 1 $ "Channel.recv time:" ++ (show time)
+
     val <- takeMVar $ channelValue ch
+
+    traceM 2 $ "Chanel.recv value received"
 
     let timeStamp = channelTimeStamp ch
     --rTime <- takeMVar $ receiverTime timeStamp 
@@ -124,9 +130,16 @@ module Reversible.Channel (
     --putMVar (receiverTime timeStamp)  nTime
     putMVar (channelTime timeStamp) $ max time cTime
 
+    trace 2 $ "Channel.recv timestamp updated"$
+
     putMVar (channelRecvAck ch) ()
 
+    trace 2 $ "Channel.recv acknowledgement sent"
+
     takeMVar $ channelSyncAck ch
+
+    trace 2 $ "Channel.recv sync received"
+
     time <- readMVar $ receiverTime timeStamp
     return (val, time)
 
@@ -136,9 +149,16 @@ module Reversible.Channel (
   -- it, and update all the times. Then, set the sync tag.
   send :: Time -> Channel a -> a -> IO Time
   send time ch val = do 
+    
+    traceM 1 $ "Channel.send time: " ++ (show time)
+
     putMVar (channelValue ch) val
 
+    traceM 2 $ "Channel.send put value"
+
     takeMVar $ channelRecvAck ch
+
+    traceM 2 $ "Channel.send acknowledgement received"
 
     let timeStamp = channelTimeStamp ch
     cTime <- takeMVar $ channelTime timeStamp
@@ -150,7 +170,11 @@ module Reversible.Channel (
     modifyMVar_ (receiverTime timeStamp) (\_ -> return nTime)
     modifyMVar_ (senderTime timeStamp) (\_ -> return nTime)
 
+    traceM 2 $ "Channel.send timestamp updated"
+
     putMVar (channelSyncAck ch) ()
+
+    traceM 2 $ "Channel.send sync sent"
 
     return nTime
 

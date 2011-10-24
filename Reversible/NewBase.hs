@@ -217,15 +217,20 @@ module Reversible.NewBase (
 
   par :: Show r => Proc r a -> Proc r a -> Proc r a
   par (Cont c1) (Cont c2) = Cont (\k -> do
+    traceM 1 $ "Base.par spawning 2 children"
     let b1 = runChild (newThreadState ()) id (c1 k)
     let b2 = runChild (newThreadState ()) id (c2 k)
     liftIO $ runPar b1 b2)
 
   yield :: Proc r ()
-  yield = Cont (\k -> do liftIO CC.yield; k ())
+  yield = Cont (\k -> do 
+    traceM 1 $ "Base.yield"
+    liftIO CC.yield
+    k ())
 
   newChan :: Proc r (Channel a)
   newChan = Cont (\k -> do 
+    traceM 1 $ "Base.newChan empty channel created"
     ch <- liftIO $ newEmptyChannel
     k ch)
 
@@ -236,11 +241,16 @@ module Reversible.NewBase (
   -- region. For now, we just assume we are</s>
   send :: Channel Int -> Int -> Proc r ()
   send ch v = Cont (\k -> do
+    traceM 1 $ "Base.send sending value"
+    
     -- Prepare for backtracking
     pushCheckPoint $ fakeCont (runCont (send ch v) k)
     pushSendCh ch
+    traceM 2 $ "Base.send checkpoint made"
     time <- getTime
     nTime <- liftIO $ RC.send time ch v
+    traceM 2 $ "Base.send send complete"
+
     putTime nTime
     k ())
 
@@ -250,10 +260,13 @@ module Reversible.NewBase (
   -- now, just do it regardless.</s>
   recv :: Channel Int -> Proc r Int
   recv ch = Cont (\k -> do
+    traceM 1 $ "Base.recv receiving value"
     pushCheckPoint $ fakeCont (runCont (recv ch) k)
     pushRecvCh ch
+    traceM 2 $ "Base.recv checkpoint made"
     time <- getTime
     (v, nTime) <- liftIO $ RC.recv time ch
+    traceM 2 $ "Base.recv send complete"
     putTime nTime
     k v)
 
@@ -264,11 +277,14 @@ module Reversible.NewBase (
 
   choose :: Proc r a -> Proc r a -> Proc r a
   choose (Cont c1) k2@(Cont c2) = Cont (\k -> do 
+    traceM 1 $ "Base.choose choice point entered"
     pushCheckPoint $ fakeCont (c2 k)
+    traceM 2 $ "Base.choose checkpoint made"
     -- Note, since we evaled c2 already, it's last choice is the
     -- previous choice point, not this one. However, in c1, the choice
     -- point is changed to be this one.
     putLastChoice =<< getTime
+    trace 2 $ "Base.choose last choice updated"
     c1 k)
 
   timeTravel :: Time -> Comp r (() -> IO r)
@@ -294,7 +310,9 @@ module Reversible.NewBase (
        
   backtrack :: Proc r r
   backtrack = Cont (\_ -> do
+    traceM 1 $ "Base.backtrack entering backtrack"
     c <- timeTravel =<< getLastChoice
+    traceM 2 $ "Base.backtrack timeTravel complete"
     liftIO $ c ())
 
   observeChannels :: r -> Comp r r
@@ -334,6 +352,7 @@ module Reversible.NewBase (
 
   endProcess :: Show r => r -> Proc r r
   endProcess r = Cont (\k -> do
+    traceM 1 $ "Base.endProcess ending with value: " ++ (show r)
     -- Set the channel time to maximum for all sendChs. We leave the
     -- time alone in our thread state, as we'll need it for comparison.
     sChs <- getSendCh
