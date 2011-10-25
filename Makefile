@@ -10,13 +10,13 @@ RM=/bin/rm
 all : test
 
 test : 
-	$(GHC) Reversible.Test
+	$(GHC) Reversible.NewTest
 
 ttest : 
-	$(GHC) $(RGHCFLAGS) Reversible.Test
+	$(GHC) $(RGHCFLAGS) Reversible.NewTest
 
 dtest : 
-	$(GHC) $(DGHCFLAGS) Reversible.Test
+	$(GHC) $(DGHCFLAGS) Reversible.NewTest
 
 clean :
 	$(RM) *~ Reversible/*~
