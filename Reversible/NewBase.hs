@@ -52,6 +52,7 @@ module Reversible.NewBase (
   import Reversible.LogicalTime
   -- The helpers that actually spawn threads.
   import Reversible.Concurrent
+  import Reversible.Debug
 
   -- We store continuations in a dequeue, allowing it to act like a
   -- stack, and to be garbage collected from the bottom when we
@@ -241,7 +242,7 @@ module Reversible.NewBase (
   -- region. For now, we just assume we are</s>
   send :: Channel Int -> Int -> Proc r ()
   send ch v = Cont (\k -> do
-    traceM 1 $ "Base.send sending value"
+    traceM 1 $ "Base.send sending value: " ++ (show v)
     
     -- Prepare for backtracking
     pushCheckPoint $ fakeCont (runCont (send ch v) k)
@@ -260,13 +261,13 @@ module Reversible.NewBase (
   -- now, just do it regardless.</s>
   recv :: Channel Int -> Proc r Int
   recv ch = Cont (\k -> do
-    traceM 1 $ "Base.recv receiving value"
+    traceM 2 $ "Base.recv receiving value"
     pushCheckPoint $ fakeCont (runCont (recv ch) k)
     pushRecvCh ch
     traceM 2 $ "Base.recv checkpoint made"
     time <- getTime
     (v, nTime) <- liftIO $ RC.recv time ch
-    traceM 2 $ "Base.recv send complete"
+    traceM 1 $ "Base.recv value received: " ++ (show v)
     putTime nTime
     k v)
 
@@ -284,7 +285,7 @@ module Reversible.NewBase (
     -- previous choice point, not this one. However, in c1, the choice
     -- point is changed to be this one.
     putLastChoice =<< getTime
-    trace 2 $ "Base.choose last choice updated"
+    traceM 2 $ "Base.choose last choice updated"
     c1 k)
 
   timeTravel :: Time -> Comp r (() -> IO r)
@@ -305,6 +306,7 @@ module Reversible.NewBase (
                             (zip recvHashes recvChs)
              putSendCh $ sendChs
              putRecvCh $ recvChs
+             traceM 2 $ "Base.timeTravel Checkpoint found"
              return $ checkpointK chkp             
       GT -> timeTravel time
        
@@ -326,7 +328,7 @@ module Reversible.NewBase (
     if null rChs
       -- Once our receive list is null, all our neighbors have finished,
       -- so we return the result.
-      then return r
+      then do traceM 2 $ "Base.observeChannels neighbors have finished"; return r
       else do
         -- Otherwise, we look at each channel, and compare the channel
         -- time to our time. If the channel time is less than our time,
@@ -348,7 +350,7 @@ module Reversible.NewBase (
             k <- timeTravel time
             liftIO $ k ()
           -- Otherwise, repeat until our neighbors finish
-          Nothing -> observeChannels r
+          Nothing -> do traceM 2 $ "Base.observeChannels recursive step"; observeChannels r
 
   endProcess :: Show r => r -> Proc r r
   endProcess r = Cont (\k -> do
