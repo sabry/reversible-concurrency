@@ -16,7 +16,7 @@ runTests ls = foldM_ (\ _ p  -> runTest p) () ls
 -- Mark sub0 tests basic parallel and communication operations
 --
 markSub0 :: IO ()
-markSub0 = runTests [test1, test2, test3,test4]
+markSub0 = runTests [test1, test2, test3, test4]
 
 -- Mark 0 tests the ability for threads to backtrack on their own,
 -- without any communication in a stable region (i.e. between choose
@@ -27,7 +27,7 @@ mark0 = runTests [testm0_1, testm0_2]
 -- Mark 1 tests the ability for threads to backtrack with a single
 -- choose point globally.
 --
-mark1 = runTests [testm1_1, testm1_2]
+mark1 = runTests [testm1_1,testm1_2]
 
 -- The following is no longer the case for most of these tests, as we
 -- have synchronous communication.
@@ -69,7 +69,7 @@ test3 = do ch <- newChan
                   return (x+1)))
 
 -- Expected: [1,0,11]
--- Results: [1,0,11]
+-- Results: [1 diverge
 test4 :: Proc Int Int
 test4 = do ch <- newChan
            ch2 <- newChan
@@ -79,8 +79,8 @@ test4 = do ch <- newChan
                   do send ch 10; yield; y <- recv ch2; return y])
 
 
--- Expected result: 4
--- Reult: 4
+--Expected result: 4
+--Reult: 4
 testm0_1 :: Proc Int Int
 testm0_1 = do 
   x <- choose (return 1) (return 2)
@@ -89,9 +89,11 @@ testm0_1 = do
       y <- choose (return 3) (return 4)
       case y of
         3 -> backtrack
-        4 -> endProcess y
+        4 -> return y
     1 -> backtrack 
   
+-- Expected result: [4,2]
+-- Result: [4,2]
 testm0_2 :: Proc Int Int
 testm0_2 = par
   (do x <- choose (return 1) (return 2)
@@ -100,7 +102,7 @@ testm0_2 = par
           y <- choose (return 3) (return 4)
           case y of
             3 -> backtrack
-            4 -> endProcess y
+            4 -> return y
         1 -> backtrack) 
   (do x <- choose (return 3) (return 4)
       case x of 
@@ -108,7 +110,7 @@ testm0_2 = par
           y <- choose (return 1) (return 2)
           case y of
             1 -> backtrack
-            2 -> endProcess y
+            2 -> return y
         3 -> backtrack)
 
 -- Expected: [10, 1]
@@ -140,7 +142,7 @@ testm1_1 = do ch1 <- newChan
                     y <- recv ch2
                     if y == 0
                       then backtrack
-                      else endChoice y)
+                      else endProcess y)
                 (do a <- recv ch1
                     if a == 1
                       then do send ch2 0; endProcess 0
@@ -163,9 +165,9 @@ testm1_2 = do
         else backtrack,
    do x <- recv ch1
       if x == 1
-        then do send 2 ch2; endProcess x
-        else do send 0 ch2; endProcess x,
+        then do send ch2 2; endProcess x
+        else do send ch2 0; endProcess x,
    do x <- recv ch3
       if x == 2
-        then do send 0 ch4; endProcess x
-        else do send 5 ch4; endProcess x])
+        then do send ch4 0; endProcess x
+        else do send ch4 5; endProcess x])

@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 module Reversible.Debug (
   traceM,
   traceG,
@@ -6,18 +7,15 @@ module Reversible.Debug (
 
   import qualified Debug.Trace as D
   
--- #ifndef DEBUG_LEVEL
--- #define DEBUG_LEVEL 0
--- #else
--- #define DEBUG True
--- #endif
--- 
--- #ifndef DEBUG
--- #define DEBUG False
--- #endif 
+#ifndef debug_level
+  debug_level = 0
+#else
+#define debug True
+#endif
 
-  debug = True
-  debug_level = 2
+#ifndef debug
+  debug = False
+#endif 
 
   trace_ :: a -> Int -> String -> a
   trace_ r l msg = if (and [debug, l <= debug_level])
