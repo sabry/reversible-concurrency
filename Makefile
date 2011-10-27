@@ -38,6 +38,7 @@ dtest1 :
 dtest2 : 
 	$(GHC) $(DGHCFLAGS) -Ddebug_level=2 Reversible/Test/Mark1.hs
 
+# Makes a tar file.
 tar : 
 	mkdir $(TAR_DIR)
 	$(RSYNC) $(RSYNC_FLAGS) * $(TAR_DIR)
