@@ -9,12 +9,12 @@ module Reversible.Debug (
   
 #ifndef debug_level
   debug_level = 0
-#else
-#define debug True
 #endif
 
-#ifndef debug
+#ifndef DEBUG
   debug = False
+#else
+  debug = True
 #endif 
 
   trace_ :: a -> Int -> String -> a

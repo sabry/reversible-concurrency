@@ -300,13 +300,23 @@ module Reversible.Base (
             recvChs = checkpointRecvChs chkp
             recvHashes = checkpointRecvHashes chkp 
         in
+          -- TODO: When we restore the channels, we need a way to only restore
+          -- the timeStamps for us and the channel, and not mess with
+          -- our partners timeStamp. Then, we can use our parnters
+          -- timestamp to know they've backtracked with us.
+          -- Likewise, when we save the channel, should we only save our
+          -- timeStamp and the channels? If we're not going to mess with
+          -- it, I suppose it doesn't matter.
           do liftIO $ mapM_ (uncurry restoreChannel) 
                             (zip sendHashes sendChs)
              liftIO $ mapM_ (uncurry restoreChannel) 
                             (zip recvHashes recvChs)
              putSendCh $ sendChs
              putRecvCh $ recvChs
-             traceM 2 $ "Base.timeTravel Checkpoint found"
+             traceM 2 $ "Base.timeTravel Checkpoint found at time: " ++ (show time)
+             traceM 2 $ "Base.timeTravel tracing unhashed channels: "
+             liftIO $ mapM_ (traceChannel 2) recvChs
+             liftIO $ mapM_ (traceChannel 2) recvChs
              return $ checkpointK chkp             
       GT -> timeTravel time
        
@@ -315,10 +325,15 @@ module Reversible.Base (
     traceM 1 $ "Base.backtrack entering backtrack"
     c <- timeTravel =<< getLastChoice
     traceM 2 $ "Base.backtrack timeTravel complete"
+    -- TODO: Now, we need to wait until all our channel have partners have
+    -- backtracked with us. But... we restored the channels, so that
+    -- they would know they can backtrack... So how can we ensure
+    -- they've backtracked?
     liftIO $ c ())
 
   observeChannels :: r -> Comp r r
   observeChannels r = do
+    traceM 2 $ "Base.observeChannels enetered"
     -- If any channel time is set to maxTime, then the sender has
     -- entered endProcess.
     rChs <- liftIO . filterM (\ch -> do
@@ -328,8 +343,9 @@ module Reversible.Base (
     if null rChs
       -- Once our receive list is null, all our neighbors have finished,
       -- so we return the result.
-      then do traceM 2 $ "Base.observeChannels neighbors have finished"; return r
+      then do _ <- traceM 2 $ "Base.observeChannels neighbors have finished"; return r
       else do
+        traceM 2 $ "Base.observeChannels comparing times"
         -- Otherwise, we look at each channel, and compare the channel
         -- time to our time. If the channel time is less than our time,
         -- the channel has backtracked.
@@ -340,17 +356,22 @@ module Reversible.Base (
               cTime <- liftIO $ readMVar $ channelTime $
                 channelTimeStamp ch 
               if cTime < ourTime 
-                then return $ Just ch
+                then do 
+                  traceM 2 $ "Base.observeChannels cTime less than"
+                    ++ "ourTime: " ++ (show cTime) ++ "  " ++ (show
+                      ourTime)
+                  return $ Just ch
                 else return Nothing
             Just mch -> return m) Nothing rChs
         case m of 
           -- So we backtrack too.
           Just ch -> do
             time <- liftIO $ readMVar $ channelTime $ channelTimeStamp ch
+            traceM 2 $ "Base.observeChannels channel time has descreased, backtracking to " ++ (show time)
             k <- timeTravel time
             liftIO $ k ()
           -- Otherwise, repeat until our neighbors finish
-          Nothing -> do traceM 2 $ "Base.observeChannels recursive step"; observeChannels r
+          Nothing -> do _ <- traceM 2 $ "Base.observeChannels recursive step"; observeChannels r
 
   endProcess :: Show r => r -> Proc r r
   endProcess r = Cont (\k -> do

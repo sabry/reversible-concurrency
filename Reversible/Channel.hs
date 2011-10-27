@@ -15,7 +15,9 @@ module Reversible.Channel (
   TimeStamp,
   ChannelHash,
   saveChannel,
-  restoreChannel
+  restoreChannel,
+  traceTimeStamp,
+  traceChannel
   ) where
 
   import Control.Concurrent.MVar
@@ -50,6 +52,15 @@ module Reversible.Channel (
         channelTime = cVar
       }
 
+  traceTimeStamp :: Int -> TimeStamp -> IO ()
+  traceTimeStamp i st = do
+    sTime <- readMVar $ senderTime st
+    rTime <- readMVar $ receiverTime st
+    cTime <- readMVar $ channelTime st
+    traceM i $ "Channel.traceTimeStamp senderTime: " ++ (show sTime)
+    traceM i $ "Channel.traceTimeStamp receiverTime: " ++ (show rTime)
+    traceM i $ "Channel.traceTimeStamp channelTime: " ++ (show cTime)
+
   -- Copy t1 into t2
   copyTimeStamp :: TimeStamp -> TimeStamp -> IO ()
   copyTimeStamp t1 t2 = do
@@ -64,6 +75,13 @@ module Reversible.Channel (
     channelSyncAck :: MVar ()
   }
   
+  traceChannel :: Show a => Int -> Channel a -> IO ()
+  traceChannel i ch = do
+    val <- readMVar $channelValue ch
+    traceM i $ "Channel.traceChannel val: " ++ (show val)
+    traceM i $ "Channel,traceChannel timetstamp: "
+    traceTimeStamp i $ channelTimeStamp ch
+
 --  type ChannelHash a = (Maybe a, TimeStampHash)
   type ChannelHash a = TimeStampHash
 
@@ -197,7 +215,7 @@ module Reversible.Channel (
       channelSyncAck = sync}
 
   newChannel :: a -> IO (Channel a)
-  newChannel a = _newChannel $ newMVar a
+  newChannel a = _newChannel (newMVar a) 
 
   newEmptyChannel :: IO (Channel a)
   newEmptyChannel = _newChannel newEmptyMVar
