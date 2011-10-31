@@ -68,7 +68,7 @@ module Reversible.Base (
   -- Thread primitives
   import Control.Concurrent hiding (yield,newChan)
   -- Thread primitives that we want to use in our API
-  import qualified Control.Concurrent as CC (yield,newChan)
+  import qualified CHD.Control.Concurrent as CC (yield,newChan)
 
   -- The types for processes
   
