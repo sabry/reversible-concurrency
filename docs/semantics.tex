@@ -1,0 +1,74 @@
+\documentclass[9pt]{article}
+
+\usepackage{xargs}
+\usepackage{mathpartir}
+\usepackage{xifthen}
+\usepackage{upgreek}
+\usepackage{amsfonts}
+
+\input{defs}
+\input{figs}
+
+\begin{document}
+
+  \SyntaxFigure
+
+  \SemanticsFigure
+
+\clearpage 
+
+  The NewChan rule simply adds a new channel to the global channel
+  store, and returns a new identifier for it. Note that the semantics of
+  the language currently lack a binding form that actually allows this
+  identifier to be used (since threads require the identifier), but such
+  an extension is trivial. 
+
+  The Comm rule allows two processes to communicate synchronously, if
+  the times on the channel are all in sync. This indicates that none of
+  the threads involved are currently trying to backtrack. It updates the
+  channels times to be the max of the sender or receivers time plus 1,
+  saves the current continuation to the continuation stack, and updates
+  the time of both threads.
+
+  Choose creates a new continuation whose stable time is the stable time
+  prior to the new choice point, and whose continuation is the second
+  choice. This ensure that backtracking once takes the second choice,
+  and backtracking again goes to the prior stable time.
+
+  Yield simply forces a context switch if the system cannot support all
+  threads running in parallel. Of course, a scheduler would also be
+  required in such a situation, which is not formalized here.
+
+  Backtrack finds the continuation whose logical time matches the stable
+  time of the thread, restores the timestamps on all the
+  channels it has used to the times stored for each in the past
+  continuation.  Finally, it transfers to a 'sync' context, which waits
+  for neighbors to backtrack and resynchronized the channel times.  
+  Note: if new channels have been created between the current context
+  and the last stable time, this doesn't currently handle them. I'm not
+  entirely sure how to handle such channels just yet, but this situation
+  can be avoided and the system still be useful.
+
+  Return-End provides the conditions for terminating. Both the sender
+  and receiver on all channels the thread is involved in must 'release'
+  the channel. This occurs by each setting their time on the channel to
+  some maximal time value, $\maxtime$
+
+  Return-Wait updates all the channels the thread has used with the
+  $\maxtime$ value, and continues to wait for something in the global
+  context to change before it can make progress.
+
+  Return-Back provides for backtracking of neighbor threads. The thread
+  must wait on all channels it has used, and if the threads partner has set
+  it's time backwards (that is, the neighbors time is less than the
+  channels time), then the thread must backtrack and join it's partner.
+
+  Finally, Sync, as mentioned previously, allows a backtracking thread
+  to wait for it's neighbors to join it at a previous logical time,
+  before resynchronizing the channel.
+
+
+  The formal language lacks $par$, functions, binding forms, and some
+  other uninteresting details. However, what's here should provide
+  enough interesting semantics for now.
+\end{document}
