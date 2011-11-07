@@ -28,7 +28,9 @@
   the threads involved are currently trying to backtrack. It updates the
   channels times to be the max of the sender or receivers time plus 1,
   saves the current continuation to the continuation stack, and updates
-  the time of both threads.
+  the time of both threads. Additionally, it adds the channels and their
+  time to the lists of communicated channels, which are needed to ensure
+  partners backtrack with the thread.
 
   Choose creates a new continuation whose stable time is the stable time
   prior to the new choice point, and whose continuation is the second

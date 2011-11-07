@@ -59,8 +59,15 @@ module Reversible.Base (
   -- implement that.
   import Data.Dequeue hiding (null)
 
+  -- One can always us a good map. Used for mapping channels to times in
+  -- the ThreadState
+--  import Data.Map hiding (empty, null)
+--  import qualified Data.Map as Map (empty)
+--  You know, I actually don't use it like a map. I use it like a assoc
+--  list.
+
   -- So I can use <$>
-  import Control.Applicative hiding (empty)
+  import Control.Applicative ((<$>))
   -- We use continuations to store checkpoints.
   import Control.Monad.Cont
   -- We use state to store thread local state
@@ -68,27 +75,28 @@ module Reversible.Base (
   -- Thread primitives
   import Control.Concurrent hiding (yield,newChan)
   -- Thread primitives that we want to use in our API
-  import qualified CHD.Control.Concurrent as CC (yield,newChan)
+  import qualified Control.Concurrent as CC (yield,newChan)
 
   -- The types for processes
   
+  type FakeCont r = ThreadState r -> IO r
+
   data CheckPoint r = CheckPoint {
-    checkpointTime :: Time,
-    checkpointSendChs :: [Channel Int],
-    checkpointSendHashes :: [ChannelHash Int],
-    checkpointRecvChs :: [Channel Int],
-    checkpointRecvHashes :: [ChannelHash Int],
-    checkpointK :: () -> IO r
+    checkPointTime :: Time,
+    checkPointThreadState :: ThreadState r,
+    checkPointContinuation :: FakeCont r
   }
 
   type KDeq r =  BankersDequeue (CheckPoint r)
+  type ChannelMap = [(Channel Int, Time)]-- Map (Channel Int) Time
 
   data ThreadState r = ThreadState {
+    threadId :: ThreadId,
     threadTime :: Time,
     lastChoice :: Time,
     kDequeue :: KDeq r,
-    sendCh :: [Channel Int],
-    recvCh :: [Channel Int]
+    sendCh :: ChannelMap,
+    recvCh :: ChannelMap
   } 
 
   type Comp r a = StateT (ThreadState r) IO a
@@ -100,82 +108,102 @@ module Reversible.Base (
 
   putTime :: Time -> Comp r ()
   putTime time = modify (\st -> 
-    ThreadState {threadTime = time, 
-                 lastChoice = (lastChoice st),
-                 kDequeue = (kDequeue st), 
-                 sendCh = (sendCh st), 
-                 recvCh = (recvCh st)})
+    ThreadState {
+      threadId = (threadId st),
+      threadTime = time, 
+      lastChoice = (lastChoice st),
+      kDequeue = (kDequeue st), 
+      sendCh = (sendCh st), 
+      recvCh = (recvCh st)})
   
+  _putThreadId :: ThreadId -> ThreadState r -> ThreadState r
+  _putThreadId id st = 
+    ThreadState {
+      threadId = id,
+      threadTime = (threadTime st),
+      lastChoice = (lastChoice st),
+      kDequeue = (kDequeue st),
+      sendCh = (sendCh st),
+      recvCh = (recvCh st)
+    }
+
+  putThreadId id = modify $ _putThreadId id
+
   getLastChoice :: Comp r Time
   getLastChoice = lastChoice <$> get
 
   putLastChoice :: Time -> Comp r ()
   putLastChoice time = modify (\st ->
-    ThreadState {threadTime = (threadTime st),
-                 lastChoice = time,
-                 kDequeue = (kDequeue st),
-                 sendCh = (sendCh st), 
-                 recvCh = (recvCh st)})
+    ThreadState {
+      threadId = (threadId st),
+      threadTime = (threadTime st),
+      lastChoice = time,
+      kDequeue = (kDequeue st),
+      sendCh = (sendCh st), 
+      recvCh = (recvCh st)
+    })
 
   getDeque :: Comp r (KDeq r)
   getDeque = kDequeue <$> get
 
   putDeque :: KDeq r -> Comp r ()
   putDeque deq = modify (\st ->
-    ThreadState {threadTime = (threadTime st), 
-                 lastChoice = (lastChoice st),
-                 kDequeue = deq, 
-                 sendCh = (sendCh st), 
-                 recvCh = (recvCh st)})
+    ThreadState {
+      threadId = (threadId st),
+      threadTime = (threadTime st), 
+      lastChoice = (lastChoice st),
+      kDequeue = deq, 
+      sendCh = (sendCh st), 
+      recvCh = (recvCh st) 
+    })
 
-  getSendCh :: Comp r [Channel Int]
+  getSendCh :: Comp r ChannelMap
   getSendCh = sendCh <$> get
 
-  putSendCh :: [Channel Int] -> Comp r ()
+  putSendCh :: ChannelMap -> Comp r ()
   putSendCh chs = modify (\st ->
     -- There's got to be an abstraction for this.
-    ThreadState {threadTime = (threadTime st),
-                 lastChoice = (lastChoice st),
-                 kDequeue = (kDequeue st),
-                 sendCh = chs,
-                 recvCh = (recvCh st)})
+    ThreadState {
+      threadId = (threadId st),
+      threadTime = (threadTime st),
+      lastChoice = (lastChoice st),
+      kDequeue = (kDequeue st),
+      sendCh = chs,
+      recvCh = (recvCh st)
+    })
 
-  pushSendCh :: Channel Int -> Comp r ()
-  pushSendCh ch = putSendCh <$> ((:) ch) =<< getSendCh
+  pushSendCh :: Channel Int -> Time -> Comp r ()
+  pushSendCh ch time = putSendCh <$> ((:) (ch, time)) =<< getSendCh
   
-  getRecvCh :: Comp r [Channel Int]
+  getRecvCh :: Comp r ChannelMap
   getRecvCh = recvCh <$> get
 
-  putRecvCh :: [Channel Int] -> Comp r ()
+  putRecvCh :: ChannelMap -> Comp r ()
   putRecvCh chs = modify (\st ->
-    ThreadState {threadTime = (threadTime st),
-                 lastChoice = (lastChoice st),
-                 kDequeue = (kDequeue st),
-                 sendCh = (sendCh st),
-                 recvCh = chs})
+    ThreadState {
+      threadId = (threadId st),
+      threadTime = (threadTime st),
+      lastChoice = (lastChoice st),
+      kDequeue = (kDequeue st),
+      sendCh = (sendCh st),
+      recvCh = chs
+    })
 
-  pushRecvCh :: Channel Int -> Comp r ()
+  pushRecvCh :: Channel Int -> Time -> Comp r ()
   -- HA! that's unreadable. Maybe I should rewrite that in a more
   -- readable way...
-  pushRecvCh ch = putRecvCh <$> ((:) ch) =<< getRecvCh
+  pushRecvCh ch time = putRecvCh <$> ((:) (ch, time)) =<< getRecvCh
 
-  pushCheckPoint :: (ThreadState r -> () -> IO r) -> Comp r ()
+  pushCheckPoint :: (FakeCont r) -> Comp r ()
   pushCheckPoint k = do
     st <- get
     time <- getTime
     deq <- getDeque 
-    sChs <- getSendCh
-    rChs <- getRecvCh
-    sHashes <- mapM (liftIO . saveChannel) sChs
-    rHashes <- mapM (liftIO . saveChannel) rChs
     putDeque $ pushFront deq 
       CheckPoint {
-        checkpointTime = time,
-        checkpointSendChs = sChs,
-        checkpointSendHashes = sHashes,
-        checkpointRecvChs = rChs,
-        checkpointRecvHashes = rHashes,
-        checkpointK = k st
+        checkPointTime = time,
+        checkPointThreadState = st,
+        checkPointContinuation = k
       }
 
   popCheckPoint :: Comp r (CheckPoint r)
@@ -192,30 +220,33 @@ module Reversible.Base (
   -- Basic parallelism with communication
   
   runChild :: ThreadState r -> (ThreadState r -> ThreadState r) -> Comp r r -> IO r
-  runChild st f k = evalStateT k $ f st
+  runChild st f k = do
+    id <- myThreadId 
+    evalStateT k $ _putThreadId id (f st)
 
   newThreadState :: () -> ThreadState r 
   newThreadState _ =  
     ThreadState {
+      threadId = undefined, -- This should be filled in by runChild
       threadTime = baseTime, 
       lastChoice = baseTime,
       kDequeue = pushFront empty 
         CheckPoint {
-          checkpointTime = baseTime,
-          checkpointSendChs = [],
-          checkpointSendHashes = [],
-          checkpointRecvChs = [],
-          checkpointRecvHashes = [],
+          checkPointTime = baseTime,
           -- When we backtrack past a par call, we want to kill the
-          -- thread. This should be more abstract though.
-          checkpointK = (\_ -> do 
+          -- thread. This should be more abstract though. And I'm not
+          -- convinced this will work.... And according to the formal
+          -- semantics, this doesn't happen.
+          checkPointThreadState = undefined,
+          checkPointContinuation = (\_ -> do 
               _ <- killThread <$> myThreadId
               return undefined)
         },
-      sendCh = [],
+      sendCh = [], 
       recvCh = []
     }
 
+  
   par :: Show r => Proc r a -> Proc r a -> Proc r a
   par (Cont c1) (Cont c2) = Cont (\k -> do
     traceM 1 $ "Base.par spawning 2 children"
@@ -246,9 +277,9 @@ module Reversible.Base (
     
     -- Prepare for backtracking
     pushCheckPoint $ fakeCont (runCont (send ch v) k)
-    pushSendCh ch
-    traceM 2 $ "Base.send checkpoint made"
     time <- getTime
+    pushSendCh ch time 
+    traceM 2 $ "Base.send checkpoint made"
     nTime <- liftIO $ RC.send time ch v
     traceM 2 $ "Base.send send complete"
 
@@ -263,9 +294,9 @@ module Reversible.Base (
   recv ch = Cont (\k -> do
     traceM 2 $ "Base.recv receiving value"
     pushCheckPoint $ fakeCont (runCont (recv ch) k)
-    pushRecvCh ch
-    traceM 2 $ "Base.recv checkpoint made"
     time <- getTime
+    pushRecvCh ch time
+    traceM 2 $ "Base.recv checkpoint made"
     (v, nTime) <- liftIO $ RC.recv time ch
     traceM 1 $ "Base.recv value received: " ++ (show v)
     putTime nTime
@@ -273,8 +304,8 @@ module Reversible.Base (
 
   -- Backtracking
   
-  fakeCont ::  Comp r r -> ThreadState r -> (() -> IO r)
-  fakeCont exp st =  (\_ -> evalStateT exp st)
+  fakeCont ::  Comp r r -> ThreadState r -> IO r -- :: Comp r r -> FakeCont r
+  fakeCont exp st =  evalStateT exp st
 
   choose :: Proc r a -> Proc r a -> Proc r a
   choose (Cont c1) k2@(Cont c2) = Cont (\k -> do 
@@ -291,14 +322,11 @@ module Reversible.Base (
   timeTravel :: Time -> Comp r (() -> IO r)
   timeTravel time = do
     chkp <- popCheckPoint
-    case compare (checkpointTime chkp) time of
+    case compare (checkPointTime chkp) time of
       LT -> undefined
       EQ -> 
-        let k = checkpointK chkp
-            sendChs = checkpointSendChs chkp
-            sendHashes = checkpointSendHashes chkp
-            recvChs = checkpointRecvChs chkp
-            recvHashes = checkpointRecvHashes chkp 
+        let k = checkPointContinuation chkp
+            st = checkPointThreadState chkp
         in
           -- TODO: When we restore the channels, we need a way to only restore
           -- the timeStamps for us and the channel, and not mess with
@@ -307,58 +335,72 @@ module Reversible.Base (
           -- Likewise, when we save the channel, should we only save our
           -- timeStamp and the channels? If we're not going to mess with
           -- it, I suppose it doesn't matter.
-          do liftIO $ mapM_ (uncurry restoreChannel) 
-                            (zip sendHashes sendChs)
-             liftIO $ mapM_ (uncurry restoreChannel) 
-                            (zip recvHashes recvChs)
-             putSendCh $ sendChs
-             putRecvCh $ recvChs
-             traceM 2 $ "Base.timeTravel Checkpoint found at time: " ++ (show time)
-             traceM 2 $ "Base.timeTravel tracing unhashed channels: "
-             liftIO $ mapM_ (traceChannel 2) recvChs
-             liftIO $ mapM_ (traceChannel 2) recvChs
-             return $ checkpointK chkp             
+          do 
+            -- OK, now we need to restore all the send channels send
+            -- time to the time in the map, and all the recieve channels
+            -- receive time to the time in the map..
+            liftIO $ mapM_ (\(ch, time) -> modifySendTime (\_ -> return time) ch) $ sendCh st
+            liftIO $ mapM_ (\(ch, time) -> modifyRecvTime (\_ -> return time) ch) $ recvCh st
+
+            traceM 2 $ "Base.timeTravel Checkpoint found at time: " ++ (show time)
+--            traceM 2 $ "Base.timeTravel tracing unhashed channels: "
+--            liftIO $ mapM_ (traceChannel 2) recvCh st
+--            liftIO $ mapM_ (traceChannel 2) sendCh st
+            return $ (\_ -> k st)
       GT -> timeTravel time
        
+  sync :: [Channel Int] -> IO ()
+  sync ls = case ls of 
+    [] -> return ()
+    (ch:chs) -> do
+      rTime <- getRecvTime ch
+      sTime <- getSendTime ch
+      if rTime == sTime
+        then do modifyChanTime (\_ -> return sTime) ch; sync chs
+        else sync ls
+
   backtrack :: Proc r r
   backtrack = Cont (\_ -> do
     traceM 1 $ "Base.backtrack entering backtrack"
+    -- XXX: I may have accidently killed the laziness in here. Maybe not
     c <- timeTravel =<< getLastChoice
     traceM 2 $ "Base.backtrack timeTravel complete"
     -- TODO: Now, we need to wait until all our channel have partners have
     -- backtracked with us. But... we restored the channels, so that
     -- they would know they can backtrack... So how can we ensure
     -- they've backtracked?
+    (sync . fst . unzip) <$> getSendCh
+    (sync . fst . unzip) <$> getRecvCh
     liftIO $ c ())
 
   observeChannels :: r -> Comp r r
   observeChannels r = do
     traceM 2 $ "Base.observeChannels enetered"
-    -- If any channel time is set to maxTime, then the sender has
+    -- If any send time is set to maxTime, then the sender has
     -- entered endProcess.
-    rChs <- liftIO . filterM (\ch -> do
-      val <- readMVar $ channelTime $ channelTimeStamp ch
+    rChs <- liftIO . filterM (\(ch, time) -> do
+      val <- getSendTime ch 
       return $ val /= maxTime) =<< getRecvCh
     putRecvCh rChs
     if null rChs
-      -- Once our receive list is null, all our neighbors have finished,
+      -- Once our receive list is null, all our partners have finished,
       -- so we return the result.
       then do _ <- traceM 2 $ "Base.observeChannels neighbors have finished"; return r
       else do
         traceM 2 $ "Base.observeChannels comparing times"
-        -- Otherwise, we look at each channel, and compare the channel
-        -- time to our time. If the channel time is less than our time,
+        -- Otherwise, we look at each channel, and compare the sender
+        -- (since we're only watching our receive channe list)
+        -- time to our time. If the sender time is less than our time,
         -- the channel has backtracked.
-        m <- foldM (\m ch ->
+        m <- foldM (\m (ch, time) ->
           case m of 
             Nothing -> do
               ourTime <- getTime
-              cTime <- liftIO $ readMVar $ channelTime $
-                channelTimeStamp ch 
-              if cTime < ourTime 
+              sTime <- liftIO $ getSendTime ch
+              if sTime < ourTime 
                 then do 
-                  traceM 2 $ "Base.observeChannels cTime less than"
-                    ++ "ourTime: " ++ (show cTime) ++ "  " ++ (show
+                  traceM 2 $ "Base.observeChannels sTime less than"
+                    ++ "ourTime: " ++ (show sTime) ++ "  " ++ (show
                       ourTime)
                   return $ Just ch
                 else return Nothing
@@ -366,10 +408,10 @@ module Reversible.Base (
         case m of 
           -- So we backtrack too.
           Just ch -> do
-            time <- liftIO $ readMVar $ channelTime $ channelTimeStamp ch
+            time <- liftIO $ getSendTime ch
             traceM 2 $ "Base.observeChannels channel time has descreased, backtracking to " ++ (show time)
-            k <- timeTravel time
-            liftIO $ k ()
+            c <- timeTravel time
+            liftIO $ c () 
           -- Otherwise, repeat until our neighbors finish
           Nothing -> do _ <- traceM 2 $ "Base.observeChannels recursive step"; observeChannels r
 
@@ -379,17 +421,20 @@ module Reversible.Base (
     -- Set the channel time to maximum for all sendChs. We leave the
     -- time alone in our thread state, as we'll need it for comparison.
     sChs <- getSendCh
-    liftIO $ mapM_ (\ch -> do
-      let timestamp = channelTimeStamp ch
-      modifyMVar_ (channelTime timestamp) (\_ -> return maxTime)) sChs
+    liftIO $ mapM_ (\(ch, time) -> do
+      modifySendTime (\_ -> return maxTime) ch) sChs
     k =<< observeChannels r)
 
   -- Run 
   runProc :: Proc r r -> IO r
-  runProc p = evalStateT 
-    (runCont p (\r -> return r)) 
-    ThreadState {threadTime = baseTime, 
-                 lastChoice = baseTime, 
-                 kDequeue = empty, 
-                 sendCh = [], 
-                 recvCh = []} 
+  runProc p = do 
+    id <- myThreadId 
+    evalStateT (runCont p (\r -> return r)) 
+      ThreadState {
+        threadId = id,
+        threadTime = baseTime, 
+        lastChoice = baseTime, 
+        kDequeue = empty, 
+        sendCh = [], 
+        recvCh = []
+      } 

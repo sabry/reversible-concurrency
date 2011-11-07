@@ -2,7 +2,7 @@ module Reversible.Concurrent (
   runPar 
   ) where
 
-  import CHD.Control.Concurrent 
+  import Control.Concurrent 
 
   wrapProc :: Show r => IO [r] -> MVar () -> MVar [r] -> IO ()
   wrapProc p block mvar = do

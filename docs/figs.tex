@@ -3,10 +3,10 @@
   \begin{sdisplaymath}
     \begin{array}{lcrl}
       \mbox{\textit{Thread}} &
-      \T & \defeq & \thread{\tctxt}{\ectxt}
+      \thread & \defeq & \threadjudg{\tctxt}{\ectxt}
       \\[2pt]
       \mbox{\textit{Parallel Threads}} &
-      \P & \bnfdef & \Pjudg{\P}{\P} \bnfalt \T
+      \P & \bnfdef & \Pjudg{\P}{\P} \bnfalt \thread
       \\[2pt]
       \mbox{\textit{Process ID}} &
       \pid & \defeq & \textit{A representation process IDis}
@@ -20,13 +20,13 @@
         encounter a backtrack}
       \\[2pt]
       \mbox{\textit{Send Channel IDs}} &
-      \ls & \bnfdef & \cdot \bnfalt \ls[\chx]
+      \ls & \bnfdef & \cdot \bnfalt \ls[\chx \mapsto \time]
       \\[2pt]
       \mbox{\textit{Receive Channel IDs}} & 
-      \lr & \bnfdef & \cdot \bnfalt \lr[\chx]
+      \lr & \bnfdef & \cdot \bnfalt \lr[\chx \mapsto \time]
       \\[2pt]
       \mbox{\textit{Continuation Stack}} &
-      \ks & \bnfdef & \cdot \bnfalt \ks[\T]
+      \ks & \bnfdef & \cdot \bnfalt \ks[\time]
       \\[2pt]
       \mbox{\textit{Global Channel State}} &
       \chctxt & \bnfdef & \cdot \bnfalt \chctxt[\chx \mapsto \ch]
@@ -72,20 +72,20 @@
       {~}
       {\judg
         {\chctxt}
-        {\Pjudg{\P}{\thread{\gamma}{\ectxt[\newchan]}}}
+        {\Pjudg{\P}{\threadjudg{\gamma}{\ectxt[\newchan]}}}
         {\chctxt[\chx \mapsto \ch]}
-        {\Pjudg{\P}{\thread{\gamma}{\ectxt[\chx]}}}}
+        {\Pjudg{\P}{\threadjudg{\gamma}{\ectxt[\chx]}}}}
 
     \inferrule*[left=Comm]
       {\ctime{\ch} \equiv \stime{\ch} \equiv \rtime{\ch} \+
       \timepr = max(\time_1, \time_2)+1 \+
-      k_1 = \thread{\gamma_1}{\ectxtone[\send{\v}{\chx}]} \+
-      k_2 = \thread{\gamma_2}{\ectxttwo[\recv]} \+
+      k_1 = \threadjudg{\gamma_1}{\ectxtone[\send{\v}{\chx}]} \+
+      k_2 = \threadjudg{\gamma_2}{\ectxttwo[\recv]} \+
       \widehat{\gamma_1} = \tctxt
                 [\pid_1]
                 [\timepr]
                 [\ks,k_1]   
-                [\ls,\chx]
+                [\ls,\chx\mapsto\timepr]
                 [\lr]
                 [\choice] \+
       \widehat{\gamma_2} =  \tctxt
@@ -93,28 +93,28 @@
                 [\timepr]
                 [\ks,k_2]
                 [\ls]
-                [\lr,\chx]
+                [\lr,\chx\mapsto\timepr]
                 [\choice]
       } 
       {\judg
         {\chctxt[\chx \mapsto \ch]}
         {\Pjudg{\P}
           {\Pjudg
-            {\thread{\gamma_1}{\ectxtone[\send{\v}{\chx}]}}
-            {\thread{\gamma_2}{\ectxttwo[\recv]}}}}
+            {\threadjudg{\gamma_1}{\ectxtone[\send{\v}{\chx}]}}
+            {\threadjudg{\gamma_2}{\ectxttwo[\recv]}}}}
         {\chctxt[\chx \mapsto \chpr]}
         {\Pjudg{\Ppr}
           {\Pjudg
-            {\thread
+            {\threadjudg
               {\widehat{\gamma_1}}
               {\ectxtone[\unit]}}
-            {\thread
+            {\threadjudg
               {\widehat{\gamma_2}}
               {\ectxttwo[\v]}}}}
       }
   
     \inferrule*[left=(Choose)]
-      {k = \thread{\gamma}{\ectxt[\e_2]} \+
+      {k = \threadjudg{\gamma}{\ectxt[\e_2]} \+
       \hat{\gamma} = 
         \tctxt
           [\pid]
@@ -126,23 +126,23 @@
         }
       {\judg
         {\chctxt}
-        {\Pjudg{\P}{\thread{\gamma}{\ectxt[\choose{\e_1}{\e_2}]}}}
+        {\Pjudg{\P}{\threadjudg{\gamma}{\ectxt[\choose{\e_1}{\e_2}]}}}
         {\chctxt}
-        {\Pjudg{\P}{\thread{\hat{\gamma}}{\ectxt[\e_1]}}}
+        {\Pjudg{\P}{\threadjudg{\hat{\gamma}}{\ectxt[\e_1]}}}
       }
 
     \inferrule*[left=(Yield)]
       {~}
       {\judg
         {\chctxt}
-        {\Pjudg{\P}{\thread{\gamma}{\ectxt[\yield]}}}
+        {\Pjudg{\P}{\threadjudg{\gamma}{\ectxt[\yield]}}}
         {\chctxt}
-        {\Pjudg{\thread{\gamma}{\ectxt[\unit]}}{\P}}
+        {\Pjudg{\threadjudg{\gamma}{\ectxt[\unit]}}{\P}}
       }
 
     \inferrule*[left=(Backtrack)]
       {\exists k \in \ks. 
-        k = \thread{\hat{\gamma}}{\ectxtpr} \textit{ where }
+        k = \threadjudg{\hat{\gamma}}{\ectxtpr} \textit{ where }
         \hat{\gamma} = 
           \tctxt
             [\pid]
@@ -156,9 +156,9 @@
       {
       \judg
         {\chctxt}
-        {\Pjudg{\P}{\thread{\gamma}{\ectxt[\backtrack]}}}
+        {\Pjudg{\P}{\threadjudg{\gamma}{\ectxt[\backtrack]}}}
         {\chctxtpr} 
-        {\Pjudg{\P}{\thread{\hat{\gamma}}{\sync{\ectxtpr}}}}
+        {\Pjudg{\P}{\threadjudg{\hat{\gamma}}{\sync{\ectxtpr}}}}
       }
 
     \inferrule*[left=(Return-End)]
@@ -166,9 +166,9 @@
       \chctxt(\chx). \rtime{\ch} \equiv \stime{\ch} \equiv \maxtime}
       {\judg
         {\chctxt}
-        {\Pjudg{\P}{\thread{\gamma}{\ectxt[\return]}}}
+        {\Pjudg{\P}{\threadjudg{\gamma}{\ectxt[\return]}}}
         {\chctxt}
-        {\Pjudg{\P}{\thread{\gamma}{\ectxt[\v]}}}
+        {\Pjudg{\P}{\threadjudg{\gamma}{\ectxt[\v]}}}
       } 
 
     \inferrule*[left=(Return-Wait)]
@@ -177,9 +177,9 @@
       }
       {\judg
         {\chctxt}
-        {\Pjudg{\P}{\thread{\gamma}{\ectxt[\return]}}}
+        {\Pjudg{\P}{\threadjudg{\gamma}{\ectxt[\return]}}}
         {\chctxtpr}
-        {\Pjudg{\P}{\thread{\gamma}{\ectxt[\return]}}}
+        {\Pjudg{\P}{\threadjudg{\gamma}{\ectxt[\return]}}}
       }
 
     \inferrule*[left=(Return-Back)]
@@ -200,9 +200,9 @@
       }
       {\judg
         {\chctxt} 
-        {\Pjudg{\P}{\thread{\gamma}{\ectxt[\return]}}} 
+        {\Pjudg{\P}{\threadjudg{\gamma}{\ectxt[\return]}}} 
         {\chctxt} 
-        {\Pjudg{\P}{\thread{\hat{\gamma}}{\ectxt[\backtrack]}}} 
+        {\Pjudg{\P}{\threadjudg{\hat{\gamma}}{\ectxt[\backtrack]}}} 
       }
 
     \inferrule*[left=(Sync)]
@@ -215,9 +215,9 @@
       }
       {\judg
         {\chctxt}
-        {\Pjudg{\P}{\thread{\gamma}{\sync{\ectxt}}}}
+        {\Pjudg{\P}{\threadjudg{\gamma}{\sync{\ectxt}}}}
         {\chctxtpr}
-        {\Pjudg{\P}{\thread{\gamma}{\ectxt}}}
+        {\Pjudg{\P}{\threadjudg{\gamma}{\ectxt}}}
       }
 
   \end{smathpar}

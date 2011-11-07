@@ -7,17 +7,18 @@ module Reversible.Channel (
   newEmptyChannel,
   Time,
   Channel,
-  -- these 4 methods should not be exposed, but for now...
-  channelTimeStamp,
-  senderTime,
-  receiverTime,
-  channelTime,
   TimeStamp,
-  ChannelHash,
-  saveChannel,
-  restoreChannel,
   traceTimeStamp,
-  traceChannel
+  traceChannel,
+  getSendTime,
+  getRecvTime,
+  getChanTime,
+  -- I'm not sure these three should be exposed... well, at least not
+  -- without more restriction. A thread should only be allowed to edit
+  -- it's time, and not the others.
+  modifySendTime,
+  modifyRecvTime,
+  modifyChanTime
   ) where
 
   import Control.Concurrent.MVar
@@ -30,28 +31,6 @@ module Reversible.Channel (
     channelTime :: MVar Time
   }
   
-  type TimeStampHash = (Time, Time, Time)
-  
-  -- Helpers for creating and restoring the channel.
-  hashTimeStamp :: TimeStamp -> IO TimeStampHash
-  hashTimeStamp t = do
-    sTime <- readMVar $ senderTime t
-    rTime <- readMVar $ receiverTime t
-    cTime <- readMVar $ channelTime t
-    return (sTime, rTime, cTime)
-
-  unhashTimeStamp :: TimeStampHash -> IO TimeStamp
-  unhashTimeStamp (sTime, rTime, cTime) = do
-    sVar <- newMVar sTime
-    rVar <- newMVar rTime
-    cVar <- newMVar cTime
-    return $
-      TimeStamp {
-        senderTime = sVar,
-        receiverTime = rVar,
-        channelTime = cVar
-      }
-
   traceTimeStamp :: Int -> TimeStamp -> IO ()
   traceTimeStamp i st = do
     sTime <- readMVar $ senderTime st
@@ -60,13 +39,6 @@ module Reversible.Channel (
     traceM i $ "Channel.traceTimeStamp senderTime: " ++ (show sTime)
     traceM i $ "Channel.traceTimeStamp receiverTime: " ++ (show rTime)
     traceM i $ "Channel.traceTimeStamp channelTime: " ++ (show cTime)
-
-  -- Copy t1 into t2
-  copyTimeStamp :: TimeStamp -> TimeStamp -> IO ()
-  copyTimeStamp t1 t2 = do
-    modifyMVar_ (senderTime t2) $ \_ -> (readMVar $ senderTime t1) 
-    modifyMVar_ (receiverTime t2) $ \_ -> (readMVar $ receiverTime t1) 
-    modifyMVar_ (channelTime t2) $ \_ -> (readMVar $ channelTime t1) 
 
   data Channel a = Channel {
     channelValue :: MVar a,
@@ -81,50 +53,6 @@ module Reversible.Channel (
     traceM i $ "Channel.traceChannel val: " ++ (show val)
     traceM i $ "Channel,traceChannel timetstamp: "
     traceTimeStamp i $ channelTimeStamp ch
-
---  type ChannelHash a = (Maybe a, TimeStampHash)
-  type ChannelHash a = TimeStampHash
-
-  hashChannel :: Channel a -> IO (ChannelHash a)
-  hashChannel ch = hashTimeStamp $ channelTimeStamp ch
-    -- Wait, these are zero buffer channels. The only thing we need to
-    -- hash is the timestamp....
---     val <- tryTakeMVar $ channelValue ch  
---     case val of
---       Nothing -> return ()
---       Just v -> putMVar (channelValue ch) v
---     hash <- hashTimeStamp $ channelTimeStamp ch
---     return (val, hash)
-  
-  unhashChannel :: ChannelHash a -> IO (Channel a)
-  unhashChannel hash = do
-  -- Remember, zero buffer channel
---    vVar <- case val of 
---             Nothing -> newEmptyMVar
---             Just val -> newMVar val
-    vVar <- newEmptyMVar
-    rVar <- newEmptyMVar
-    timestamp <- unhashTimeStamp hash
-    sVar <- newEmptyMVar
-    return $ 
-      Channel {
-        channelValue = vVar,
-        channelTimeStamp = timestamp,
-        channelRecvAck = rVar,
-        channelSyncAck = sVar
-      }
-
-  -- Copies the contents of channel 1 into channel 2
-  copyChannel :: Channel a -> Channel a -> IO ()
-  copyChannel ch1 ch2 = do
-  -- Remember, zero buffer channel
---    mval <- tryTakeMVar $ channelValue ch1
---    case mval of
---      Nothing -> do tryTakeMVar $ channelValue ch2; return ()
---      Just v -> do
---        tryTakeMVar $ channelValue ch2
---        putMVar (channelValue ch2) v
-    copyTimeStamp (channelTimeStamp ch1) (channelTimeStamp ch2)
 
   -- To read off the channel, first we read the value. Next, we get the
   -- max of the incoming timestamp, the receiver timestamp on the
@@ -223,19 +151,24 @@ module Reversible.Channel (
   _getTime :: (TimeStamp -> MVar Time) -> Channel a -> IO Time
   _getTime f = readMVar . f . channelTimeStamp
 
+  _modifyTime :: (TimeStamp -> MVar Time) -> (Time -> IO Time) -> Channel a -> IO ()
+  _modifyTime f1 f2 ch = modifyMVar_ (f1 $ channelTimeStamp ch) f2
+
   getRecvTime :: Channel a -> IO Time
   getRecvTime = _getTime receiverTime
+
+  modifyRecvTime :: (Time -> IO Time) -> Channel a -> IO ()
+  modifyRecvTime f = _modifyTime receiverTime f
 
   getSendTime :: Channel a -> IO Time
   getSendTime = _getTime senderTime 
 
+  modifySendTime :: (Time -> IO Time) -> Channel a -> IO ()
+  modifySendTime f = _modifyTime senderTime f 
+
   getChanTime :: Channel a -> IO Time
   getChanTime = _getTime channelTime 
 
-  saveChannel :: Channel a -> IO (ChannelHash a)
-  saveChannel = hashChannel
+  modifyChanTime :: (Time -> IO Time) -> Channel a -> IO ()
+  modifyChanTime f = _modifyTime channelTime f
 
-  restoreChannel :: ChannelHash a -> Channel a -> IO ()
-  restoreChannel hash ch = do
-    newCh <- unhashChannel hash
-    copyChannel newCh ch
