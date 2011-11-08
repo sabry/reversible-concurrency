@@ -73,9 +73,9 @@ module Reversible.Base (
   -- We use state to store thread local state
   import Control.Monad.State
   -- Thread primitives
-  import Control.Concurrent hiding (yield,newChan)
+  import CHD.Control.Concurrent hiding (yield,newChan)
   -- Thread primitives that we want to use in our API
-  import qualified Control.Concurrent as CC (yield,newChan)
+  import qualified CHD.Control.Concurrent as CC (yield,newChan)
 
   -- The types for processes
   

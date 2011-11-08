@@ -21,7 +21,7 @@ module Reversible.Channel (
   modifyChanTime
   ) where
 
-  import Control.Concurrent.MVar
+  import CHD.Control.Concurrent
   import Reversible.LogicalTime 
   import Reversible.Debug
 
