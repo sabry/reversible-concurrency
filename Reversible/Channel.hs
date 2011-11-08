@@ -69,12 +69,10 @@ module Reversible.Channel (
 
     traceM 2 $ "Channel.recv value received"
 
-    let timeStamp = channelTimeStamp ch
     --rTime <- takeMVar $ receiverTime timeStamp 
-    cTime <- takeMVar $ channelTime timeStamp 
     --let nTime = max time cTime
     --putMVar (receiverTime timeStamp)  nTime
-    putMVar (channelTime timeStamp) $ max time cTime
+    modifyChanTime (\cTime -> return $ max time cTime) ch
 
     traceM 2 $ "Channel.recv timestamp updated"
 
@@ -86,7 +84,7 @@ module Reversible.Channel (
 
     traceM 2 $ "Channel.recv sync received"
 
-    time <- readMVar $ receiverTime timeStamp
+    time <- getRecvTime ch
     return (val, time)
 
   -- Write the value to the channel, then wait for an acknowledgment.
@@ -106,15 +104,14 @@ module Reversible.Channel (
 
     traceM 2 $ "Channel.send acknowledgement received"
 
-    let timeStamp = channelTimeStamp ch
-    cTime <- takeMVar $ channelTime timeStamp
+    cTime <- getChanTime ch-- takeMVar $ channelTime timeStamp
     --_ <- takeMVar $ receiverTime timeStamp
     --_ <- takeMVar $ senderTime timeStamp
 
     let nTime = incTime $ max time cTime
-    putMVar (channelTime timeStamp) nTime
-    modifyMVar_ (receiverTime timeStamp) (\_ -> return nTime)
-    modifyMVar_ (senderTime timeStamp) (\_ -> return nTime)
+    modifyChanTime (\_ -> return nTime) ch
+    modifySendTime (\_ -> return nTime) ch
+    modifyRecvTime (\_ -> return nTime) ch
 
     traceM 2 $ "Channel.send timestamp updated"
 
