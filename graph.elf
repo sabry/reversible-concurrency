@@ -11,6 +11,8 @@ back-s : state. %% r < c, s < c, s < r
 back-r : state. %% r < c, s < c, r < s
 back : state. %% r < c, s = r
 
+id-state : state -> state -> type.
+id-state/refl : id-state ST ST.
 
 pred : nat -> nat -> nat -> state -> type.
 
@@ -34,11 +36,11 @@ pred/recv-ack : %% C < S, S = R
 pred/send-recv-back : %% R < C, C < S
   pred S C R send-recv-back 
   <- nat-lt R C 
-  <- nat-lt C R.
+  <- nat-lt C S.
   
 pred/recv-back : %% R < C, C = S
   pred N N R recv-back 
-  <- nat-lt R C.
+  <- nat-lt R N.
 
 pred/send-back : %% S < C, C = R
   pred S N N send-back
@@ -60,7 +62,33 @@ pred/back :  %% R < C, S = R
   pred N C N back
   <- nat-lt N C.
 
-%mode pred +S +C +R -ST.
-%worlds () (pred _ _ _ _).
-%total {} (pred _ _ _ ST).
+% mode pred +S +C +R -ST.
+% worlds () (pred _ _ _ _).
+% total {} (pred _ _ _ _). % Total check proves there is no missed case
 
+pred-unique : pred S N C ST -> pred S N C ST' -> id-state ST ST' -> type.
+
+%mode pred-unique +D1 +D2 -ST.
+
+- : pred-unique pred/consist pred/consist id-state/refl.
+
+- : pred-unique (pred/send-req (nat-lt C S)) (pred/send-req (nat-lt C S)) id-state/refl.
+
+- : pred-unique (pred/recv-int (nat-lt S R) (nat-lt C S)) (pred/recv-int (nat-lt S R) (nat-lt C S)) id-state/refl.
+
+- : pred-unique (pred/recv-ack (nat-lt C S)) (pred/recv-ack (nat-lt C S)) id-state/refl.
+
+- : pred-unique (pred/send-recv-back (nat-lt C R) (nat-lt C S)) (pred/send-recv-back (nat-lt C R) (nat-lt C S)) id-state/refl.
+
+- : pred-unique (pred/recv-back (nat-lt R N)) (pred/recv-back (nat-lt R N)) id-state/refl.
+
+- : pred-unique (pred/send-back (nat-lt S N)) (pred/send-back (nat-lt S N)) id-state/refl.
+
+- : pred-unique (pred/back-s (nat-lt S R) (nat-lt S C) (nat-lt R C)) (pred/back-s (nat-lt S R) (nat-lt S C) (nat-lt R C)) id-state/refl.
+
+- : pred-unique (pred/back-r (nat-lt R S) (nat-lt S C) (nat-lt R C)) (pred/back-r (nat-lt R S) (nat-lt S C) (nat-lt R C)) id-state/refl.
+
+- : pred-unique (pred/back (nat-lt N C)) (pred/back (nat-lt N C)) id-state/refl.
+
+%worlds () (pred-unique _ _ _).
+%total {} (pred-unique _ _ _).
