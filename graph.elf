@@ -1,0 +1,66 @@
+state : type.
+
+consist : state. %% s = c = r
+send-req : state. %% s > c = r
+recv-int : state. %% c < s, r > s
+recv-ack : state. %% s = r < c
+send-recv-back : state. %% s > c < r
+recv-back : state. %% s = c > r
+send-back : state. %% s < c = r
+back-s : state. %% r < c, s < c, s < r
+back-r : state. %% r < c, s < c, r < s
+back : state. %% r < c, s = r
+
+
+pred : nat -> nat -> nat -> state -> type.
+
+
+pred/consist : %% S == C == R
+  pred N N N consist. 
+
+pred/send-req : %% C == R, C < S
+  pred S N N send-req 
+  <- nat-lt N S.
+
+pred/recv-int : %% C < S, S < R
+  pred S C R recv-int 
+  <- nat-lt C S 
+  <- nat-lt S R.
+
+pred/recv-ack : %% C < S, S = R
+  pred S N N recv-ack 
+  <- nat-lt N S.
+  
+pred/send-recv-back : %% R < C, C < S
+  pred S C R send-recv-back 
+  <- nat-lt R C 
+  <- nat-lt C R.
+  
+pred/recv-back : %% R < C, C = S
+  pred N N R recv-back 
+  <- nat-lt R C.
+
+pred/send-back : %% S < C, C = R
+  pred S N N send-back
+  <- nat-lt S N.
+
+pred/back-s : %% R < C, S < C, S < R
+  pred S C R back-s
+  <- nat-lt R C
+  <- nat-lt S C
+  <- nat-lt S R.
+
+pred/back-r : %% R < C, S < C, R < S
+  pred S C R back-r
+  <- nat-lt R C 
+  <- nat-lt S C
+  <- nat-lt R S.
+
+pred/back :  %% R < C, S = R
+  pred N C N back
+  <- nat-lt N C.
+
+%mode pred +S +C +R -ST.
+%worlds () (pred _ _ _ _).
+%total {} (pred _ _ _ ST).
+
