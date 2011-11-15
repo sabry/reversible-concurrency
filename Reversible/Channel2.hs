@@ -1,7 +1,7 @@
 module Reversible.Channel2 (
   send,
   recv, 
-  ChannelState,
+  ChannelState(..),
   getState,
        -- States: 
        -- 0,0,0 < Consistent
@@ -66,6 +66,43 @@ module Reversible.Channel2 (
              then SendRequest
              else RecvBacktrack
 
+  
+  _putSendTime :: Time -> _Channel a -> _Channel a
+  _putSendTime time ch = _Channel {chanValue ch, time, chanTime ch, recvTime ch}
+
+  _putRecvTime :: Time -> _Channel a -> _Channel a
+  _putRecvTime time ch = _Channel {chanValue ch, sendTime ch, chanTime ch, time}
+
+  _putChanTime :: Time -> _Channel a -> _Channel a
+  _putChanTime time ch = _Channel {chanValue ch, sendTime ch, time, recvTime ch}
+
+  _putChanValue :: a -> _Channel a -> _Channel a
+  _putChanValue val ch = _Channel {val, sendTime ch, chanTime ch, recvTime ch}
+
+  putSendTime :: Time -> Channel a -> IO ()
+  putSendTime time = (flip atomicModifyIORef) $ (\ch -> (_putSendTime time ch, ()))
+
+  putRecvTime :: Time -> Channel a -> IO ()
+  putRecvTime time = (flip atomicModifyIORef) $ (\ch -> (_putRecvTime time ch, ()))
+
+  putChanTime :: Time -> Channel a -> IO ()
+  putChanTime time = (flip atomicModifyIORef) $ (\ch -> (_putChanTime time ch, ()))
+
+  putChanValue :: a -> Channel a -> IO ()
+  putChanValue val = (flip atomicModifyIORef) $ (\ch -> (_putChanValue val ch, ()))
+
+  getSendTime :: Channel a -> IO Time
+  getSendTime = sendTime <$> readIORef 
+
+  getRecvTime :: Channel a -> IO Time
+  getRecvTime = recvTime <$> readIORef
+
+  getChanTime :: Channel a -> IO Time
+  getChanTime = chanTime <$> readIORef
+
+  getChanValue :: Channel a -> IO a
+  getChanValue = chanValue <$> readIORef
+
   newChannel :: a -> IO (Channel a)
   newChannel a = newIORef Channel {
     chanValue = a,
@@ -78,38 +115,93 @@ module Reversible.Channel2 (
   newEmptyChannel =  newChannel undefined
 
   sendBacktrack :: Time -> Channel a -> IO () 
-  sendBacktrack time ch = atomicModifyIORef ch $  (\ch -> 
-    -- A sendBacktrack must put the send time before the current channel
-    -- time
-      if (not $ time < chanTime ch)
-        then error "Error in sendBacktrack: given time is not" ++
-          " less than the channel time"
-        else Channel {
-          chanValue = chanValue ch,
-          sendTime = time,
-          chanTime = (chanTime ch),
-          recvTime = (recvTime ch)
-          }
-      )
+  sendBacktrack time ch = do
+    cTime <- getChanTime
+    if (not $ time < cTime)
+      -- A sendBacktrack must put the send time before the current channel
+      -- time
+      then error "Error in sendBacktrack: given time is not" ++
+        " less than the channel time"
+      else putSendTime time ch
 
   recvBacktrack :: Time -> Channel a -> IO ()
-  recvBacktrack time ch = atmoicModifyIORef ch $ (\ch ->
-    if (not $ time < chanTime ch)
-        then error "Error in recvBacktrack: given time is not" ++
-          " less than the channel time"
-        else Channel {
-          chanValue = chanValue ch,
-          sendTime = (sendTime ch),
-          chanTime = (chanTime ch),
-          recvTime = time
-        }
-    )
+  recvBacktrack time ch = do
+    cTime <- getChanTime
+    if (not $ time < cTime)
+      -- A recvBacktrack must put the recv time before the current channel
+      -- time
+      then error "Error in recvBacktrack: given time is not" ++
+        " less than the channel time"
+      else putRecvTime time ch
+  
+
+  -- Given a current state and a state we want to be in, return a
+  -- function that will move to that state.
+  transition :: ChannelState -> ChannelState -> Channel a -> Channel a
+  transition cur tar = 
+    let bad = error "Invalid transition: " ++ (show cur) ++ " -> " ++ (show tar)
+    in
+    case cur of
+      Consistent ->
+        case tar of 
+          SendRequest 
+          RecvRequest
+          RecvBacktrack
+          SendBacktrack
+          _ -> bad
+
+      SendRequest -> 
+        case tar of
+          CommAccept
+          RecvBacktrack
+          _ -> bad
+
+      RecvRequest ->
+        case tar of 
+          CommAccept
+          SendBacktrack
+          _ -> bad
+
+      CommAccept ->
+        case tar of 
+          Consistent 
+            -- since transitioning to consistent is the senders job, the
+            -- receiver might immediately make a request
+          RecvBacktrack
+          RecvRequest
+          _ -> bad
+
+      RecvBacktrack ->
+        case tar of
+          BacktrackAccept 
+          _ -> bad
+
+      SendBacktrack ->
+        case tar of
+          BacktrackAccept 
+          _ -> bad
+
+      BacktrackAccept ->
+       case tar of 
+          Consistent 
+            -- since transitioning to consistent is the
+            -- senders job, the receiver might immediately make a request
+          RecvRequest 
+          RecvBacktrack
+          _ -> bad
 
   send :: Time -> Channel a -> a -> IO Time
   send time ch val = do
     state <- getState ch
     case state of
-      Consistent -> -- Update send time, wait for CommAccept state
+      Consistent -> do -- Update send time, wait for CommAccept state
+        putSendTime time ch
+        state <- getState ch
+        case state of
+          CommAccept -> 
+          RecvBacktrack -> 
+        
+        
       RecvRequest -> -- Update send and chan time, return
       RecvBacktrack -> -- We need to backtrack
       -- else, it's an error
