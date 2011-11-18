@@ -34,9 +34,6 @@ nat-lt : nat -> nat -> type.
 nat-lt/z : nat-lt z (s N).
 nat-lt/s : nat-lt (s N1) (s N2) <- nat-lt N1 N2.
 
-%mode nat-lt +N1 +N2.
-%worlds () (nat-lt _ _).
-%total N1 (nat-lt N1 _).
 
 plus-reduces  : {N2}{N3}
          plus N1 N2 N3
