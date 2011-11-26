@@ -1,0 +1,47 @@
+digraph state_machine{
+  //Nodes
+
+  consist [label="s = c = r\nConsist"] 
+  sendreq [label="s > c\nc = r\nSendReq"]
+  recvb [label="r < c\nc = s\nRecvB"] 
+  sendb [label="s < c\nc = r\nSencB"]
+
+  comm_int [label="s > c\nr > s"]
+  recv_ack [label="c < s\ns = r\nRecvAck"]
+  sback_int [label="r < c\ns > c"]
+  
+  back_rint [label="s < r\ns < c\nr < c"]
+  back_sint [label="r < c\ns < c\n r < s"]
+  back_ack [label="r < c\ns = r\nBack"]
+
+  // Edges
+  consist -> sendreq [label="send(s' > s)"]
+  consist -> recvb [label="recv(r' < r)"]
+  consist -> sendb [label="send(s ' < s)"]
+
+  sendreq -> comm_int [label="recv(r' > s)"]
+  sendreq -> recv_ack [label="recv(r' = s)"]
+  sendreq -> sendb [label="send(s' < c)"]
+  sendreq -> sback_int [label="recv(r' < c)"]
+
+  comm_int -> recv_ack [label="send(s' = r)"]
+
+  recv_ack -> consist [label="send(c' = s)"]
+
+  sback_int -> back_rint [label="send(s' < r)"]
+  sback_int -> back_ack [label="send(s' = r)"]
+  
+  recvb -> back_rint [label="send(s' < r)"]
+  recvb -> back_ack [label="send(s' = r)"]
+
+  sendb -> back_sint [label="recv(r' < s)"]
+  sendb -> back_ack [label="recv(r' = s)"]
+
+  back_rint -> back_sint [label="recv(r' < s)"]
+  back_rint -> back_ack [label="recv(r' = s)"]
+
+  back_sint -> back_rint [label="send(s' < r)"]
+  back_sint -> back_ack [label="send(s' = r)"]
+
+  back_ack -> consist [label="send(c' = s)"]
+}
