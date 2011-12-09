@@ -29,8 +29,8 @@
 \newcommand{\tchctxt}[2]{
   \elseextend{#2}{#1}
 }
-\newcommand{\chctxt}[1][]{\tchctxt{#1}{\Updelta}}
-\newcommand{\chctxtpr}[1][]{\tchctxt{#1}{\Updelta^{\prime}}}
+\newcommand{\CH}[1][]{\tchctxt{#1}{\Updelta}}
+\newcommand{\CHpr}[1][]{\tchctxt{#1}{\Updelta^{\prime}}}
 \newcommand{\chx}[1][x]{#1}
 \newcommand{\ch}[1][ch]{#1}
 \newcommand{\chpr}{\ch[\ch^{\prime}]}
@@ -38,6 +38,9 @@
 \newcommand{\stime}[1]{stime(#1)}
 \newcommand{\rtime}[1]{rtime(#1)}
 \newcommand{\ctime}[1]{ctime(#1)}
+\newcommand{\spr}{\pr{s}}
+\newcommand{\rpr}{\pr{r}}
+\newcommand{\cpr}{\pr{c}}
 
 %   The language form macros
 \newcommand{\unit}{\langle\rangle}
@@ -57,12 +60,12 @@
     {#2}
     {#2(#1)}
 }
-\newcommand{\ectxt}[1][]{\tectxt{#1}{E}}
-\newcommand{\ectxtpr}[1][]{\tectxt{#1}{\pr{E}}}
-\newcommand{\ectxtone}[1][]{\tectxt{#1}{E_1}}
-\newcommand{\ectxttwo}[1][]{\tectxt{#1}{E_2}}
-\newcommand{\ectxtonepr}[1][]{\tectxt{#1}{\pr{E}_1}}
-\newcommand{\ectxttwopr}[1][]{\tectxt{#1}{\pr{E}_2}}
+\newcommand{\E}[1][]{\tectxt{#1}{E}}
+\newcommand{\Epr}[1][]{\tectxt{#1}{\pr{E}}}
+\newcommand{\Eone}[1][]{\tectxt{#1}{E_1}}
+\newcommand{\Etwo}[1][]{\tectxt{#1}{E_2}}
+\newcommand{\Eonepr}[1][]{\tectxt{#1}{\pr{E}_1}}
+\newcommand{\Etwopr}[1][]{\tectxt{#1}{\pr{E}_2}}
 \newcommand{\sync}[1]{sync~#1}
 
 %   Process macros
@@ -71,47 +74,47 @@
 \newcommand{\Pjudg}[2]{
   #1\|#2  
 }
-\newcommand{\thread}{\mathcal{D}}
+\newcommand{\K}{\mathcal{K}}
 
 %     Thread State macros
 \newcommand{\pid}{\mathcal{I}}
 \newcommand{\pidpr}{\pr{\pid}}
-\renewcommand{\time}{\mathcal{T}}
-\newcommand{\timepr}{\pr{\time}}
-\newcommand{\ks}[1][]{
-  \elseextend{\mathcal{K}}{#1}
+\newcommand{\T}{\mathcal{T}}
+\newcommand{\Tpr}{\pr{\time}}
+\newcommand{\Ks}[1][]{
+  \elseextend{\mathcal{K}_s}{#1}
 }
-\newcommand{\kspr}[1][]{
-  \elseextend{\pr{\mathcal{K}}}{#1}
+\newcommand{\Kspr}[1][]{
+  \elseextend{\pr{\mathcal{K}_s}}{#1}
 }
-\newcommand{\ls}[1][]{
-  \elseextend{\mathcal{L}_s}{#1}
+\newcommand{\Cs}[1][]{
+  \elseextend{\mathcal{C}_s}{#1}
 }
-\newcommand{\lr}[1][]{
-  \elseextend{\mathcal{L}_r}{#1}
+\newcommand{\Cr}[1][]{
+  \elseextend{\mathcal{C}_r}{#1}
 }
-\newcommand{\choice}{\mathcal{S}}
-\newcommand{\lspr}[1][]{
-  \elseextend{\pr{\mathcal{L}}_s}{#1}
+
+\newcommand{\Cspr}[1][]{
+  \elseextend{\pr{\mathcal{C}}_s}{#1}
 }
-\newcommand{\lrpr}[1][]{
-  \elseextend{\pr{\mathcal{L}}_r}{#1}
+\newcommand{\Crpr}[1][]{
+  \elseextend{\pr{\mathcal{C}}_r}{#1}
 }
-\newcommand{\choicepr}{\pr{\mathcal{S}}}
-\newcommand{\lsone}[1][]{
-  \elseextend{\mathcal{L}_{s1}}{#1}
+
+\newcommand{\Csone}[1][]{
+  \elseextend{\mathcal{C}_{s1}}{#1}
 }
-\newcommand{\lrone}[1][]{
-  \elseextend{\mathcal{L}_{r1}}{#1}
+\newcommand{\Crone}[1][]{
+  \elseextend{\mathcal{C}_{r1}}{#1}
 }
-\newcommand{\lstwo}[1][]{
-  \elseextend{\mathcal{L}_{s2}}{#1}
+\newcommand{\Cstwo}[1][]{
+  \elseextend{\mathcal{C}_{s2}}{#1}
 }
-\newcommand{\lrtwo}[1][]{
-  \elseextend{\mathcal{L}_{r2}}{#1}
+\newcommand{\Crtwo}[1][]{
+  \elseextend{\mathcal{C}_{r2}}{#1}
 }
-\newcommand{\lsonepr}{\pr{\lsone}}
-\newcommand{\lronepr}{\pr{\lrone}}
+\newcommand{\Csonepr}{\pr{\lsone}}
+\newcommand{\Cronepr}{\pr{\lrone}}
 \newcommandx{\tctxt}[6][1=\pid,2=\time,3=\ks,4=\ls,5=\lr,6=\choice]{
   \left[#1;#2;#3;#4;#5;#6\right]  
 }
@@ -133,8 +136,8 @@
 \newcommand{\gammapr}{\pr{\Upgamma}}
 
 %   Thread macros
-\newcommand{\threadjudg}[2]{
-  #1#2  
+\newcommand{\Kjudg}[2]{
+  #1:#2  
 }
 
 %   Judgment macros

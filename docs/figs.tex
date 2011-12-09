@@ -2,40 +2,39 @@
 \newcommand{\syntax}{
   \begin{sdisplaymath}
     \begin{array}{lcrl}
-      \mbox{\textit{Thread}} &
-      \thread & \defeq & \threadjudg{\tctxt}{\ectxt}
+      \mbox{\textit{Continuation}} &
+      \K & \defeq & \Kjudg{\S}{\E}
       \\[2pt]
       \mbox{\textit{Parallel Threads}} &
-      \P & \bnfdef & \Pjudg{\P}{\P} \bnfalt \thread
+      \P & \bnfdef & \Pjudg{\P}{\P} \bnfalt \K
       \\[2pt]
-      \mbox{\textit{Process ID}} &
-      \pid & \defeq & \textit{A representation process IDis}
-      \\[2pt]
+%      \mbox{\textit{Process ID}} &
+%      \pid & \defeq & \textit{A representation process IDis}
+%      \\[2pt]
       \mbox{\textit{Logical time}} &
-      \time & \defeq & \textit{A representation of the logical time of
+      \T & \defeq & \textit{A representation of the logical time of
         the thread} 
       \\[2pt]
-      \mbox{\textit{Stable time}} &
-      \choice & \defeq & \textit{The logical time to backtrack to if we
-        encounter a backtrack}
+      \mbox{\textit{Choice Continutation}} &
+      \K_c & \defeq & \textit{The continuation of the last 'choose'}
       \\[2pt]
       \mbox{\textit{Send Channel IDs}} &
-      \ls & \bnfdef & \cdot \bnfalt \ls[\chx \mapsto \time]
+      \Cs & \bnfdef & \cdot \bnfalt \Cs[\chx \mapsto \T]
       \\[2pt]
       \mbox{\textit{Receive Channel IDs}} & 
-      \lr & \bnfdef & \cdot \bnfalt \lr[\chx \mapsto \time]
+      \Cr & \bnfdef & \cdot \bnfalt \Cr[\chx \mapsto \T]
       \\[2pt]
       \mbox{\textit{Continuation Stack}} &
-      \ks & \bnfdef & \cdot \bnfalt \ks[\time]
+      \Ks & \bnfdef & \cdot \bnfalt \Ks[\T]
       \\[2pt]
       \mbox{\textit{Global Channel State}} &
-      \chctxt & \bnfdef & \cdot \bnfalt \chctxt[\chx \mapsto \ch]
+      \CH & \bnfdef & \cdot \bnfalt \CH[\chx \mapsto \ch]
       \\[2pt]
       \mbox{\textit{Channel}} &
-      \ch & \defeq & \left(stime,rtime,ctime\right)
+      \ch & \defeq & \left(s,c,r\right)
       \\[2pt]
       \mbox{\textit{Evaluation Context}} &
-      \ectxt & \bnfdef & \cdot \bnfalt \sync{\ectxt} \bnfalt \ectxt[\e]
+      \E & \bnfdef & \cdot \bnfalt \sync{\K} \bnfalt \E[\e]
       \\[2pt]
       \mbox{\textit{Terms}} &
       \e & \bnfdef & \send \bnfalt \recv \bnfalt \yield \bnfalt \newchan
@@ -45,6 +44,32 @@
       \v & \bnfdef & \unit \bnfalt 0,1,\dots 
     \end{array}
   \end{sdisplaymath}
+}
+
+\newcommand{\statepreds}{
+  \begin{tabbing}
+    $\chx(\spr$\=$< s)~if:$\+\\
+       $s=c=r$\\
+       $s > c, r=c$\\
+       $s < c, r < c, s > r$
+    \-
+    \\[2pt]
+    $\chx(\spr > s)~if:$\\
+    \> $s=c=r$
+    \\[2pt]
+    $\chx(\cpr = s)~if:$\\
+    \> $r=s, s>c$
+    \> $r=s, s<c$
+    \\[2pt]
+    $\chx(\rpr < r)~if:$\+\\
+       $r=c=s$\\
+       $s>c,r=c$\\
+       $s<c,r<c,s<r$
+    \-
+    \\[2pt]
+    $\chx(\rpr > r)~if:$\\
+    \> $s>c,r=c$
+  \end{tabbing}
 }
 
 \newcommand{\semantics}{
@@ -72,15 +97,15 @@
       {~}
       {\judg
         {\chctxt}
-        {\Pjudg{\P}{\threadjudg{\gamma}{\ectxt[\newchan]}}}
+        {\Pjudg{\P}{\threadjudg{\gamma}{\E[\newchan]}}}
         {\chctxt[\chx \mapsto \ch]}
-        {\Pjudg{\P}{\threadjudg{\gamma}{\ectxt[\chx]}}}}
+        {\Pjudg{\P}{\threadjudg{\gamma}{\E[\chx]}}}}
 
     \inferrule*[left=Comm]
       {\ctime{\ch} \equiv \stime{\ch} \equiv \rtime{\ch} \+
       \timepr = max(\time_1, \time_2)+1 \+
-      k_1 = \threadjudg{\gamma_1}{\ectxtone[\send{\v}{\chx}]} \+
-      k_2 = \threadjudg{\gamma_2}{\ectxttwo[\recv]} \+
+      k_1 = \threadjudg{\gamma_1}{\Eone[\send{\v}{\chx}]} \+
+      k_2 = \threadjudg{\gamma_2}{\Etwo[\recv]} \+
       \widehat{\gamma_1} = \tctxt
                 [\pid_1]
                 [\timepr]
@@ -100,21 +125,21 @@
         {\chctxt[\chx \mapsto \ch]}
         {\Pjudg{\P}
           {\Pjudg
-            {\threadjudg{\gamma_1}{\ectxtone[\send{\v}{\chx}]}}
-            {\threadjudg{\gamma_2}{\ectxttwo[\recv]}}}}
+            {\threadjudg{\gamma_1}{\Eone[\send{\v}{\chx}]}}
+            {\threadjudg{\gamma_2}{\Etwo[\recv]}}}}
         {\chctxt[\chx \mapsto \chpr]}
         {\Pjudg{\Ppr}
           {\Pjudg
             {\threadjudg
               {\widehat{\gamma_1}}
-              {\ectxtone[\unit]}}
+              {\Eone[\unit]}}
             {\threadjudg
               {\widehat{\gamma_2}}
-              {\ectxttwo[\v]}}}}
+              {\Etwo[\v]}}}}
       }
   
     \inferrule*[left=(Choose)]
-      {k = \threadjudg{\gamma}{\ectxt[\e_2]} \+
+      {k = \threadjudg{\gamma}{\E[\e_2]} \+
       \hat{\gamma} = 
         \tctxt
           [\pid]
@@ -126,23 +151,23 @@
         }
       {\judg
         {\chctxt}
-        {\Pjudg{\P}{\threadjudg{\gamma}{\ectxt[\choose{\e_1}{\e_2}]}}}
+        {\Pjudg{\P}{\threadjudg{\gamma}{\E[\choose{\e_1}{\e_2}]}}}
         {\chctxt}
-        {\Pjudg{\P}{\threadjudg{\hat{\gamma}}{\ectxt[\e_1]}}}
+        {\Pjudg{\P}{\threadjudg{\hat{\gamma}}{\E[\e_1]}}}
       }
 
     \inferrule*[left=(Yield)]
       {~}
       {\judg
         {\chctxt}
-        {\Pjudg{\P}{\threadjudg{\gamma}{\ectxt[\yield]}}}
+        {\Pjudg{\P}{\threadjudg{\gamma}{\E[\yield]}}}
         {\chctxt}
-        {\Pjudg{\threadjudg{\gamma}{\ectxt[\unit]}}{\P}}
+        {\Pjudg{\threadjudg{\gamma}{\E[\unit]}}{\P}}
       }
 
     \inferrule*[left=(Backtrack)]
       {\exists k \in \ks. 
-        k = \threadjudg{\hat{\gamma}}{\ectxtpr} \textit{ where }
+        k = \threadjudg{\hat{\gamma}}{\Epr} \textit{ where }
         \hat{\gamma} = 
           \tctxt
             [\pid]
@@ -156,9 +181,9 @@
       {
       \judg
         {\chctxt}
-        {\Pjudg{\P}{\threadjudg{\gamma}{\ectxt[\backtrack]}}}
+        {\Pjudg{\P}{\threadjudg{\gamma}{\E[\backtrack]}}}
         {\chctxtpr} 
-        {\Pjudg{\P}{\threadjudg{\hat{\gamma}}{\sync{\ectxtpr}}}}
+        {\Pjudg{\P}{\threadjudg{\hat{\gamma}}{\sync{\Epr}}}}
       }
 
     \inferrule*[left=(Return-End)]
@@ -166,9 +191,9 @@
       \chctxt(\chx). \rtime{\ch} \equiv \stime{\ch} \equiv \maxtime}
       {\judg
         {\chctxt}
-        {\Pjudg{\P}{\threadjudg{\gamma}{\ectxt[\return]}}}
+        {\Pjudg{\P}{\threadjudg{\gamma}{\E[\return]}}}
         {\chctxt}
-        {\Pjudg{\P}{\threadjudg{\gamma}{\ectxt[\v]}}}
+        {\Pjudg{\P}{\threadjudg{\gamma}{\E[\v]}}}
       } 
 
     \inferrule*[left=(Return-Wait)]
@@ -177,9 +202,9 @@
       }
       {\judg
         {\chctxt}
-        {\Pjudg{\P}{\threadjudg{\gamma}{\ectxt[\return]}}}
+        {\Pjudg{\P}{\threadjudg{\gamma}{\E[\return]}}}
         {\chctxtpr}
-        {\Pjudg{\P}{\threadjudg{\gamma}{\ectxt[\return]}}}
+        {\Pjudg{\P}{\threadjudg{\gamma}{\E[\return]}}}
       }
 
     \inferrule*[left=(Return-Back)]
@@ -200,9 +225,9 @@
       }
       {\judg
         {\chctxt} 
-        {\Pjudg{\P}{\threadjudg{\gamma}{\ectxt[\return]}}} 
+        {\Pjudg{\P}{\threadjudg{\gamma}{\E[\return]}}} 
         {\chctxt} 
-        {\Pjudg{\P}{\threadjudg{\hat{\gamma}}{\ectxt[\backtrack]}}} 
+        {\Pjudg{\P}{\threadjudg{\hat{\gamma}}{\E[\backtrack]}}} 
       }
 
     \inferrule*[left=(Sync)]
@@ -215,9 +240,9 @@
       }
       {\judg
         {\chctxt}
-        {\Pjudg{\P}{\threadjudg{\gamma}{\sync{\ectxt}}}}
+        {\Pjudg{\P}{\threadjudg{\gamma}{\sync{\E}}}}
         {\chctxtpr}
-        {\Pjudg{\P}{\threadjudg{\gamma}{\ectxt}}}
+        {\Pjudg{\P}{\threadjudg{\gamma}{\E}}}
       }
 
   \end{smathpar}
@@ -237,4 +262,12 @@
     \caption{Semantics} 
     \label{fig:semantics}
   \end{figure}
+}
+
+\newcommand{\StatePredFigure}[1][th]{
+  \begin{figure}[#1]
+    \statepreds
+    \caption{State Predicates} 
+    \label{fig:state-preds}
+  \end{figure}   
 }
