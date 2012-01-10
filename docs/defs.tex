@@ -24,6 +24,8 @@
 %   Time macros
 \newcommand{\maxtime}{\mathbb{M}}
 \newcommand{\zerotime}{\mathbb{Z}}
+\renewcommand{\S}{\mathcal{S}}
+\newcommand{\Spr}{\pr{\S}}
 
 %   Channel Macros
 \newcommand{\tchctxt}[2]{
@@ -31,7 +33,7 @@
 }
 \newcommand{\CH}[1][]{\tchctxt{#1}{\Updelta}}
 \newcommand{\CHpr}[1][]{\tchctxt{#1}{\Updelta^{\prime}}}
-\newcommand{\chx}[1][x]{#1}
+\newcommand{\chx}[1][x]{#1_{ch}}
 \newcommand{\ch}[1][ch]{#1}
 \newcommand{\chpr}{\ch[\ch^{\prime}]}
 
@@ -43,6 +45,10 @@
 \newcommand{\cpr}{\pr{c}}
 
 %   The language form macros
+\newcommand{\pare}[2]{par~#1~#2}
+\newcommand{\x}[1][x]{#1}
+\newcommand{\fun}[2]{\lambda~#1.#2}
+\newcommand{\app}[2]{#1~#2}
 \newcommand{\unit}{\langle\rangle}
 \newcommand{\e}{e}
 \renewcommand{\v}{v}
@@ -80,7 +86,7 @@
 \newcommand{\pid}{\mathcal{I}}
 \newcommand{\pidpr}{\pr{\pid}}
 \newcommand{\T}{\mathcal{T}}
-\newcommand{\Tpr}{\pr{\time}}
+\newcommand{\Tpr}{\pr{\T}}
 \newcommand{\Ks}[1][]{
   \elseextend{\mathcal{K}_s}{#1}
 }

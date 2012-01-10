@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.1415926-2.3-1.40.12 (TeX Live 2012/dev/Arch Linux) (format=pdflatex 2011.12.4)  7 DEC 2011 18:44
+This is pdfTeX, Version 3.1415926-2.3-1.40.12 (TeX Live 2012/dev/Arch Linux) (format=pdflatex 2011.12.4)  23 DEC 2011 00:55
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -130,37 +130,42 @@ LaTeX Font Info:    Try loading font information for U+msb on input line 15.
 (/usr/share/texmf-dist/tex/latex/amsfonts/umsb.fd
 File: umsb.fd 2009/06/22 v3.00 AMS symbols B
 )
-Overfull \hbox (79.44516pt too wide) detected at line 15
+Overfull \hbox (113.4916pt too wide) detected at line 15
 []
  []
 
 [1
 
-{/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map}] [2] [3
+{/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map}]
+Underfull \hbox (badness 10000) in paragraph at lines 24--24
+
+ []
+
+[2
 
 ] (./semantics.aux) ) 
 Here is how much of TeX's memory you used:
- 1184 strings out of 493633
- 13878 string characters out of 3148832
- 75226 words of memory out of 3000000
- 4491 multiletter control sequences out of 15000+200000
+ 1187 strings out of 493633
+ 13884 string characters out of 3148832
+ 72783 words of memory out of 3000000
+ 4494 multiletter control sequences out of 15000+200000
  11748 words of font info for 45 fonts, out of 3000000 for 9000
  831 hyphenation exceptions out of 8191
- 27i,9n,33p,220b,290s stack positions out of 5000i,500n,10000p,200000b,50000s
+ 27i,16n,36p,220b,401s stack positions out of 5000i,500n,10000p,200000b,50000s
 </usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi
 10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi6.pfb></usr/sh
 are/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi9.pfb></usr/share/texmf-dist/
 fonts/type1/public/amsfonts/cm/cmr10.pfb></usr/share/texmf-dist/fonts/type1/pub
 lic/amsfonts/cm/cmr6.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/
-cmr9.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy7.pfb></usr/
+cmr9.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy6.pfb></usr/
 share/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy9.pfb></usr/share/texmf-dis
 t/fonts/type1/public/amsfonts/cm/cmti9.pfb></usr/share/texmf-dist/fonts/type1/p
 ublic/amsfonts/euler/eurm10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfo
 nts/symbols/msbm10.pfb>
-Output written on semantics.pdf (3 pages, 109769 bytes).
+Output written on semantics.pdf (2 pages, 107587 bytes).
 PDF statistics:
- 58 PDF objects out of 1000 (max. 8388607)
- 41 compressed objects within 1 object stream
+ 55 PDF objects out of 1000 (max. 8388607)
+ 39 compressed objects within 1 object stream
  0 named destinations out of 1000 (max. 500000)
  1 words of extra memory for PDF output out of 10000 (max. 10000000)
 
