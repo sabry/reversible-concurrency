@@ -83,7 +83,7 @@ module Reversible.Channel2 (
   sendBInt1 ch = pred (>) (>) (>)
     
   getState :: _Channel a -> ChannelState
-  getState ch = let ls = dropWhile (\(a,_) -> a) $ 
+  getState ch = let ls = dropWhile (\(a,_) -> not a) $ 
     map (\f -> case f ch of
                 Nothing -> (False, undefined)
                 Just st -> (True, st)) predList 
@@ -120,41 +120,39 @@ module Reversible.Channel2 (
   atomicModifyChannel :: Channel a -> states -> 
                         (_Channel a -> (_Channel a, b)) ->  IO b
   atomicModifyChannel ch states f = atomicModifyIOREf (\_chan ->
-    if elem (getState _chan) states
+    if elem (getStates _chan) states
       then f _chan
       else error "Invalid precondition")
 
   send :: Time -> a -> Channel a -> IO Time
   send time ch val = do 
-    _ <- atomicModifyChannel ch sendStates (\_chan ->
-      (_putChanValue val (_putSendTime time ch), ()))
+    _ <- atomicModifyChannel ch [Consistent] (\_chan ->
+      (_putChanValue val (_putSendTime (incTime time) ch), ()))
     -- Now we must wait until the state is changed. We need some sort of
     -- busy-loop over atomicModifyChannel.
-    fix (\f -> 
-      atomicModifyChannel (\_chan ->
-        
+    fix (\f -> do
+      rep <- atomicModifyChannel ch [SendInt1, RecvAck, SendReq] (\_chan ->
+        return $ case getState _chan of
+          SendReq -> (_chan, (False, undefined)) -- Still waiting
+          RecvAck -> (_putChanTime (sendTime _chan) _chan, 
+            (True, (sendTime _chan))) -- Need to update channel time
+          SendInt1 -> let chp = _putSendTime (recvTime _chan) _chan
+            let chpp = _putChanTime (recvTime _chan) chp
+            (chpp, (True, (recvTime _chan)))
+            -- Need to update channel and send time
       )
-    )
+      if fst rep then f else snd rep
+   )
     
 
-  send :: Time -> Channel a -> a -> IO Time
-  send time ch val = do
-    state <- getState ch
-    case state of
-      Consistent -> do -- Update send time, wait for CommAccept state
-        putSendTime time ch
-        state <- getState ch
-        case state of
-          CommAccept -> 
-          RecvBacktrack -> 
-        
-        
-      RecvRequest -> -- Update send and chan time, return
-      RecvBacktrack -> -- We need to backtrack
-      -- else, it's an error
-      _ -> error "Error in send: inconsistent state " ++ state 
-
-
-
-  recv :: Channel a -> IO (a, Time)
+  recv :: Time -> Channel a -> IO (a, Time)
+  recv time ch = atomicModifyChannel ch [SendReq] (\_chan ->
+     let val = chanValue ch
+     let chp = _putChanValue undefined ch
+     let stime = sendTime chp
+     let rtime = 
+      if stime > (incTime time)
+        then stime
+        else (incTime time)
+     (_putRecvTime rtime chp, (rtime, val)))
 
