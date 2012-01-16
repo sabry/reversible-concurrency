@@ -2,7 +2,7 @@ module Reversible.Channel2 (
   send,
   recv, 
   ChannelState(..),
-  getState,
+  getStates,
        -- States: 
        -- 0,0,0 < Consistent
        -- 1,0,0 < Send request
@@ -14,22 +14,20 @@ module Reversible.Channel2 (
        -- 0,0,1 < Receive request
   Channel,
   newChannel,
-  newEmptyChannel,
-  sendBacktrack,
-  recvBacktrack
+  newEmptyChannel
   ) where
 
   import Data.IORef
   import Reversible.LogicalTime 
 
-  data _Channel a {
+  data Channel_ a = Channel_ {
     chanValue :: a,
     sendTime :: Time,
     chanTime :: Time,
     recvTime :: Time
   }
 
-  type Channal a = IORef (_Channel a)
+  type Channal a = IORef (Channel_ a)
 
   data ChannelState =
       Consistent 
@@ -43,13 +41,13 @@ module Reversible.Channel2 (
     | BackAck
     deriving (Eq,Show,Read)
   
-  predList :: _Channel a -> [Maybe ChannelState]
+  predList :: Channel_ a -> [Maybe ChannelState]
   predList ch = [consist, sendReq, recvReq, commAcc, recvBack,
                  sendBack, backAcc]
 
   -- I can't believe something like this isn't built in
   maybeIf :: Bool -> a -> Maybe a
-  maybeIf b s -> if b then Just s else Nothing
+  maybeIf b s = if b then Just s else Nothing
 
   -- I think I just abstracted too much
   type ChanRel = Time -> Time -> Bool
@@ -57,7 +55,7 @@ module Reversible.Channel2 (
           -> ChanRel -- c ? s
           -> ChanRel -- s ? r
           -> ChannelState
-          -> _Channel a
+          -> Channel_ a
           -> Maybe ChannelState
   pred ch r1 r2 r3 st = let 
     c = chanTime ch
@@ -69,7 +67,7 @@ module Reversible.Channel2 (
   top _ _ = True
 
   
-  -- they will all by :: _Channel a -> Maybe ChannelState
+  -- they will all by :: Channel_ a -> Maybe ChannelState
   -- c ? r, c ? s, s ? r
   consit = pred (==) (==) (==) Consistent
   sendReq = pred (==) (<) top SendReq
@@ -82,29 +80,45 @@ module Reversible.Channel2 (
   -- r < c, s < c, r < s
   sendBInt1 ch = pred (>) (>) (>)
     
-  getState :: _Channel a -> ChannelState
-  getState ch = let ls = dropWhile (\(a,_) -> not a) $ 
-    map (\f -> case f ch of
-                Nothing -> (False, undefined)
-                Just st -> (True, st)) predList 
-    case len ls of
+  getState :: Channel_ a -> ChannelState
+  getState ch = let ls = map (\f -> case f ch of {
+      Nothing -> (False, undefined);
+      Just st -> (True, st)}) predList
+    in
+    case len (dropWhile (\(a,_) -> not a) ls) of
       1 -> head ls
       a | a > 1 -> error "This channel is in more than 1 state: " ++
         (show ls)
       a | a == 0 -> error "This channel is not in a state!"
       _ -> error "Appearently numbers don't work"
   
-  _putSendTime :: Time -> _Channel a -> _Channel a
-  _putSendTime time ch = _Channel {chanValue ch, time, chanTime ch, recvTime ch}
+  _putSendTime :: Time -> Channel_ a -> Channel_ a
+  _putSendTime time ch = Channel_ {
+      chanValue = chanValue ch, 
+      sendTime = time, 
+      chanTime = chanTime ch, 
+      recvTime = recvTime ch}
 
-  _putRecvTime :: Time -> _Channel a -> _Channel a
-  _putRecvTime time ch = _Channel {chanValue ch, sendTime ch, chanTime ch, time}
+  _putRecvTime :: Time -> Channel_ a -> Channel_ a
+  _putRecvTime time ch = Channel_ {
+    chanValue = chanValue ch, 
+    sendTime = sendTime ch, 
+    chanTime = chanTime ch, 
+    recvTime = time}
 
-  _putChanTime :: Time -> _Channel a -> _Channel a
-  _putChanTime time ch = _Channel {chanValue ch, sendTime ch, time, recvTime ch}
+  _putChanTime :: Time -> Channel_ a -> Channel_ a
+  _putChanTime time ch = Channel_ {
+    chanValue = chanValue ch, 
+    sendTime = sendTime ch, 
+    chanTime = time, 
+    recvTime = recvTime ch}
 
-  _putChanValue :: a -> _Channel a -> _Channel a
-  _putChanValue val ch = _Channel {val, sendTime ch, chanTime ch, recvTime ch}
+  _putChanValue :: a -> Channel_ a -> Channel_ a
+  _putChanValue val ch = Channel_ {
+    chanValue = val, 
+    sendTime = sendTime ch, 
+    chanTime = chanTime ch, 
+    recvTime = recvTime ch}
 
   newChannel :: a -> IO (Channel a)
   newChannel a = newIORef Channel {
@@ -118,7 +132,7 @@ module Reversible.Channel2 (
   newEmptyChannel =  newChannel undefined
   
   atomicModifyChannel :: Channel a -> states -> 
-                        (_Channel a -> (_Channel a, b)) ->  IO b
+                        (Channel_ a -> (Channel_ a, b)) ->  IO b
   atomicModifyChannel ch states f = atomicModifyIOREf (\_chan ->
     if elem (getStates _chan) states
       then f _chan
@@ -136,23 +150,22 @@ module Reversible.Channel2 (
           SendReq -> (_chan, (False, undefined)) -- Still waiting
           RecvAck -> (_putChanTime (sendTime _chan) _chan, 
             (True, (sendTime _chan))) -- Need to update channel time
-          SendInt1 -> let chp = _putSendTime (recvTime _chan) _chan
-            let chpp = _putChanTime (recvTime _chan) chp
-            (chpp, (True, (recvTime _chan)))
+          SendInt1 -> let chp = _putSendTime (recvTime _chan) _chan in
+            let chpp = _putChanTime (recvTime _chan) chp in
+              (chpp, (True, (recvTime _chan))))
             -- Need to update channel and send time
-      )
-      if fst rep then f else snd rep
-   )
-    
+      if fst rep 
+        then f 
+        else snd rep)
 
   recv :: Time -> Channel a -> IO (a, Time)
   recv time ch = atomicModifyChannel ch [SendReq] (\_chan ->
-     let val = chanValue ch
-     let chp = _putChanValue undefined ch
-     let stime = sendTime chp
-     let rtime = 
-      if stime > (incTime time)
-        then stime
-        else (incTime time)
+     let val = chanValue ch 
+         chp = _putChanValue undefined ch
+         stime = sendTime chp
+         rtime = if stime > (incTime time)
+                  then stime
+                  else (incTime time) 
+         in
      (_putRecvTime rtime chp, (rtime, val)))
 
