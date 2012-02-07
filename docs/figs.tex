@@ -5,6 +5,9 @@
       \mbox{\textit{Continuation}} &
       \K & \defeq & \Kjudg{\S}{\E}
       \\[2pt]
+      \mbox{\textit{State}} &
+      \S & \defeq & \Ks;\T;\K_c;\Cs;\Cr
+      \\[2pt]
       \mbox{\textit{Parallel Threads}} &
       \P & \bnfdef & \Pjudg{\P}{\P} \bnfalt \K
       \\[2pt]
@@ -25,7 +28,7 @@
       \Cr & \bnfdef & \cdot \bnfalt \Cr[\chx \mapsto \T]
       \\[2pt]
       \mbox{\textit{Continuation Stack}} &
-      \Ks & \bnfdef & \cdot \bnfalt \Ks[\T]
+      \Ks & \bnfdef & \cdot \bnfalt \Ks[\K]
       \\[2pt]
       \mbox{\textit{Global Channel State}} &
       \CH & \bnfdef & \cdot \bnfalt \CH[\chx \mapsto \ch]
@@ -73,179 +76,6 @@
 }
 
 \newcommand{\semantics}{
-  \fbox{\small$\judg{\chctxt}{\P}{\chctxtpr}{\Ppr}$} 
-  \\[4pt]
-  For brevity, here are some discussion level macros:
-  \\
-    $\gamma = \tctxt$ \\
-    $\gamma_1 = \tctxtone$ \\
-    $\gamma_2 = \tctxttwo$  \\
-    $update(\chctxt,\time_s,\ls,\time_r,\lr) = \\
-        \{\chx \mapsto
-        (\time_s,\rtime{\ch},\ctime{\ch}) \mid \chx \in \ls \land
-        \ch = \chctxt(\chx) \} \cup\\ 
-        \{\chx \mapsto
-        (\stime{\ch},\time_r,\ctime{\ch}) \mid \chx \in \lr \land
-        \ch = \chctxt(\chx) \} \cup\\
-        \{\chx \mapsto \ch \mid \chx \mapsto \ch \in \chctxt
-        \land \chx \not\in \{dom(\lr) \cup dom(\lr)\}\} $
-    \\[2pt]
-%  \vspace{-3ex}
-  \begin{smathpar}
-
-    \inferrule*[left=(NewChan),right=\fresh{\ch,\chx}]
-      {~}
-      {\judg
-        {\chctxt}
-        {\Pjudg{\P}{\threadjudg{\gamma}{\E[\newchan]}}}
-        {\chctxt[\chx \mapsto \ch]}
-        {\Pjudg{\P}{\threadjudg{\gamma}{\E[\chx]}}}}
-
-    \inferrule*[left=Comm]
-      {\ctime{\ch} \equiv \stime{\ch} \equiv \rtime{\ch} \+
-      \timepr = max(\time_1, \time_2)+1 \+
-      k_1 = \threadjudg{\gamma_1}{\Eone[\send{\v}{\chx}]} \+
-      k_2 = \threadjudg{\gamma_2}{\Etwo[\recv]} \+
-      \widehat{\gamma_1} = \tctxt
-                [\pid_1]
-                [\timepr]
-                [\ks,k_1]   
-                [\ls,\chx\mapsto\timepr]
-                [\lr]
-                [\choice] \+
-      \widehat{\gamma_2} =  \tctxt
-                [\pid_2]  
-                [\timepr]
-                [\ks,k_2]
-                [\ls]
-                [\lr,\chx\mapsto\timepr]
-                [\choice]
-      } 
-      {\judg
-        {\chctxt[\chx \mapsto \ch]}
-        {\Pjudg{\P}
-          {\Pjudg
-            {\threadjudg{\gamma_1}{\Eone[\send{\v}{\chx}]}}
-            {\threadjudg{\gamma_2}{\Etwo[\recv]}}}}
-        {\chctxt[\chx \mapsto \chpr]}
-        {\Pjudg{\Ppr}
-          {\Pjudg
-            {\threadjudg
-              {\widehat{\gamma_1}}
-              {\Eone[\unit]}}
-            {\threadjudg
-              {\widehat{\gamma_2}}
-              {\Etwo[\v]}}}}
-      }
-  
-    \inferrule*[left=(Choose)]
-      {k = \threadjudg{\gamma}{\E[\e_2]} \+
-      \hat{\gamma} = 
-        \tctxt
-          [\pid]
-          [\time]
-          [\ks,k]
-          [\ls]
-          [\lr]
-          [\time]
-        }
-      {\judg
-        {\chctxt}
-        {\Pjudg{\P}{\threadjudg{\gamma}{\E[\choose{\e_1}{\e_2}]}}}
-        {\chctxt}
-        {\Pjudg{\P}{\threadjudg{\hat{\gamma}}{\E[\e_1]}}}
-      }
-
-    \inferrule*[left=(Yield)]
-      {~}
-      {\judg
-        {\chctxt}
-        {\Pjudg{\P}{\threadjudg{\gamma}{\E[\yield]}}}
-        {\chctxt}
-        {\Pjudg{\threadjudg{\gamma}{\E[\unit]}}{\P}}
-      }
-
-    \inferrule*[left=(Backtrack)]
-      {\exists k \in \ks. 
-        k = \threadjudg{\hat{\gamma}}{\Epr} \textit{ where }
-        \hat{\gamma} = 
-          \tctxt
-            [\pid]
-            [\choice]
-            [\kspr]
-            [\lspr]
-            [\lrpr]
-            [\choicepr] \+
-        \chctxtpr = update(\chctxt,\lspr(\chx),\lspr,\lrpr(\chx),\lspr)
-      }
-      {
-      \judg
-        {\chctxt}
-        {\Pjudg{\P}{\threadjudg{\gamma}{\E[\backtrack]}}}
-        {\chctxtpr} 
-        {\Pjudg{\P}{\threadjudg{\hat{\gamma}}{\sync{\Epr}}}}
-      }
-
-    \inferrule*[left=(Return-End)]
-      {\forall \chx \in \{dom(\ls) \cup dom(\lr)\}. \exists \ch \in
-      \chctxt(\chx). \rtime{\ch} \equiv \stime{\ch} \equiv \maxtime}
-      {\judg
-        {\chctxt}
-        {\Pjudg{\P}{\threadjudg{\gamma}{\E[\return]}}}
-        {\chctxt}
-        {\Pjudg{\P}{\threadjudg{\gamma}{\E[\v]}}}
-      } 
-
-    \inferrule*[left=(Return-Wait)]
-      {
-        \chctxtpr = update(\chctxt,\maxtime,\ls,\maxtime,\lr)
-      }
-      {\judg
-        {\chctxt}
-        {\Pjudg{\P}{\threadjudg{\gamma}{\E[\return]}}}
-        {\chctxtpr}
-        {\Pjudg{\P}{\threadjudg{\gamma}{\E[\return]}}}
-      }
-
-    \inferrule*[left=(Return-Back)]
-      {(\exists \chx \in dom(\lr). \exists \ch = \chctxt(\chx).
-      \stime{\ch} <  \ctime{\ch}. \timepr = \stime{\ch}) \lor
-      \+
-      (\exists \chx \in dom(\ls). \exists \ch = \chctxt(\chx).
-      \rtime{\ch} < \ctime{\ch}. \timepr = \rtime{\ch})
-       \+
-      \hat{\gamma} = 
-        \tctxt
-          [\pid]   
-          [\time]
-          [\ks]
-          [\ls]
-          [\lr]
-          [\timepr]
-      }
-      {\judg
-        {\chctxt} 
-        {\Pjudg{\P}{\threadjudg{\gamma}{\E[\return]}}} 
-        {\chctxt} 
-        {\Pjudg{\P}{\threadjudg{\hat{\gamma}}{\E[\backtrack]}}} 
-      }
-
-    \inferrule*[left=(Sync)]
-      {\forall \chx \in \{dom(\ls) \cup dom(\lr)\}. 
-        \exists \ch = \chctxt(\chx). 
-         \stime{\ch} \equiv \rtime{\ch} < \ctime{\ch} \+
-       \chctxtpr = \{ \chx \mapsto (\stime{\ch},\rtime{\ch},\stime{\ch})
-        \mid \chx \in \{dom(\ls) \cup dom(\lr)\} \land \ch =
-        \chctxt(\chx) \}
-      }
-      {\judg
-        {\chctxt}
-        {\Pjudg{\P}{\threadjudg{\gamma}{\sync{\E}}}}
-        {\chctxtpr}
-        {\Pjudg{\P}{\threadjudg{\gamma}{\E}}}
-      }
-
-  \end{smathpar}
 }
 
 \newcommand{\SyntaxFigure}[1][th]{
