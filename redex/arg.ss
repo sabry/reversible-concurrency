@@ -79,6 +79,8 @@
 (define step
   (reduction-relation
     arg
+    ;; XXX: Need to check ch is a member of D, can't use the informal
+    ;; notation
     (--> ((D (ch idle T)) 
           ((name K_s 
                 ((G_s (ch T_chs K_chs))
@@ -109,9 +111,34 @@
            (and 
              (none-backtracking (term D) (term G_r))
              (none-backtracking (term D) (term G_s)))))
+    ;; XXX: need some sort of special 'suicide' command for threads
+    ;; that backtrack past a par.
     (--> (D (G K T (in-hole E (par e_1 e_2))) P ...)
-         ;; XXX: need some sort of special 'suicide' command for threads
-         ;; that backtrack past a par.
          (D (G K T (in-hole E e_1)) (empty empty min e_2) P ...)
+         "Par"
          (side-condition
-           (none-backtracking (term D) (term G))))))
+           (none-backtracking (term D) (term G))))
+    ;; XXX: Need to modify K to use e_2 
+    (--> (D (name K (G C T (in-hole E (choose e_1 e_2)))) P ...)
+         (D (G K T (in-hole e_1)))
+         "Choose"
+         (side-condition
+           (none-backtracking (term D) (term G))))
+    ;; XXX: Need to define backtrack-channels
+    (--> (D (G (name C (G_c C_c T_c E_c)) T (in-hole E (backtrack))) P ...)
+         (,(backtrack-channels (term D) (term G_c)) C P ...)
+         "Backtrack")
+    ;; XXX: These won't work; need something like member to test for
+    ;; channel in D
+    (--> ((D (ch backtrack T)) ((G (ch T_c K)) C T_s E) P ...)
+         ((D (ch backtrack T)) K)
+         "Backtrack-GT"
+         (side-condition (> T_c T)))
+    (--> ((D (ch backtrack T)) ((G (ch T_c K)) C T_s E) P ...)
+         ((D (ch idle T)) K P ...)
+         "Backtrack-EQ"
+         (side-condition (= T_c T)))
+    (--> ((D (ch backtrack T)) (name K_p ((G (ch T_c K)) C T_s E)) P ...)
+         ((D (ch backtrack T_c)) K_p P ...)
+         "Backtrack-LT"
+         (side-condition (< T_c T)))))
