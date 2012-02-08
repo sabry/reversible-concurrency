@@ -74,6 +74,20 @@
   ;; Variables
   (x (variable-not-otherwise-mentioned)))
 
+(define (none-backtracking D G)
+  (map (lambda (x) 
+         (cond
+           [(assq (car x) D) => 
+              (lambda (x) (eq? (cadr x) 'idle))]
+           [else #t])) G)) 
+
+(define (backtrack-channels D G)
+  (map (lambda (d_ch)
+         (cond
+           [(assq (car d_ch) G) => 
+              (lambda (g_ch) `(,(car g_ch) backtrack ,(cadr g_ch)))]
+           [else d_ch])) D))
+
 ;; Judgment relation is D P => D' P'
 ;; (=> (D P) (D^ P^))
 (define step
@@ -120,12 +134,12 @@
            (none-backtracking (term D) (term G))))
     ;; XXX: Need to modify K to use e_2 
     (--> (D (name K (G C T (in-hole E (choose e_1 e_2)))) P ...)
-         (D (G K T (in-hole e_1)))
+         (D (G K T (in-hole E e_1)))
          "Choose"
          (side-condition
            (none-backtracking (term D) (term G))))
     ;; XXX: Need to define backtrack-channels
-    (--> (D (G (name C (G_c C_c T_c E_c)) T (in-hole E (backtrack))) P ...)
+    (--> (D (G (name C (G_c K_c T_c E_c)) T (in-hole E (backtrack))) P ...)
          (,(backtrack-channels (term D) (term G_c)) C P ...)
          "Backtrack")
     ;; XXX: These won't work; need something like member to test for
@@ -133,12 +147,12 @@
     (--> ((D (ch backtrack T)) ((G (ch T_c K)) C T_s E) P ...)
          ((D (ch backtrack T)) K)
          "Backtrack-GT"
-         (side-condition (> T_c T)))
+         (side-condition (> (term T_c) (term T))))
     (--> ((D (ch backtrack T)) ((G (ch T_c K)) C T_s E) P ...)
          ((D (ch idle T)) K P ...)
          "Backtrack-EQ"
-         (side-condition (= T_c T)))
+         (side-condition (= (term T_c) (term T))))
     (--> ((D (ch backtrack T)) (name K_p ((G (ch T_c K)) C T_s E)) P ...)
          ((D (ch backtrack T_c)) K_p P ...)
          "Backtrack-LT"
-         (side-condition (< T_c T)))))
+         (side-condition (< (term T_c) (term T))))))
