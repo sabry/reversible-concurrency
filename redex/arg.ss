@@ -44,7 +44,8 @@
 
   ;; Gamma is a mapping from channels to pairs of Times and
   ;; Continuations.
-  (G empty (G (ch T K))) 
+  (G ((ch T K) ...)) 
+
 
   ;; A Continuation contains the State and an evaluation context.
   (K empty (G K T E))
@@ -52,7 +53,7 @@
   ;; Global channel map. Maps channels to tags and times. Used for
   ;; backtracking: when a thread needs it's partners to backtrack, it
   ;; sets the tag and the time to when they should backtrack to.
-  (D empty (D (ch tag T))) 
+  (D ((ch tag T) ...)) 
 
   ;; Processes: Either parallel processes, a continuation, or empty.
   ;; XXX: Removed empty for now, as I'm not sure it'd needed
@@ -94,28 +95,30 @@
   (reduction-relation
     arg
     ;; XXX: Need to check ch is a member of D, can't use the informal
-    ;; notation
-    (--> ((D (ch idle T)) 
+    ;; notation 
+    (--> (D  ;(D (ch idle T))
           ((name K_s 
-                ((G_s (ch T_chs K_chs))
+                (G_s ;(G_s (ch T_chs K_chs))
                  K_cs
                  T_s
                  (in-hole E_s (send ch v)))) ;; Send Process
            (name K_r
-                 ((G_p (ch T_chr K_chr))
+                 (G_p ;(G_p (ch T_chr K_chr))
                   K_cr
                   T_r
                   (in-hole E_r (recv ch)))) ;; Receive Process
            P ...)) ;; Other processes
          ,(term-let 
-           ([time_m (+ 1 (max (term T_r) (term T_s)))])
+           ([time_m (+ 1 (max (term T_r) (term T_s)))]
+            [G_s^ (remove (term (ch T_chs K_chs)) G_s)]
+            [G_r^ (remove (term (ch T_chr K_chr)) G_r)])
            (term
-             ((D (ch idle time_m))
-              (((G_s (ch time_m K_s))
+             (D
+              (((G_s^ ... (ch time_m K_s))
                 C_s
                 time_m 
                 (in-hole E_s unit)) ;; Send Process
-               ((G_p (ch time_m K_r))
+               ((G_r^ ... (ch time_m K_r))
                 C_r
                 time_m 
                 (in-hole E_r v)) ;; Receive Process
@@ -124,7 +127,11 @@
          (side-condition
            (and 
              (none-backtracking (term D) (term G_r))
-             (none-backtracking (term D) (term G_s)))))
+             (none-backtracking (term D) (term G_s))
+             ;; XXX: I'm not sure this works.
+             (member (term (ch idle T)) (term D))
+             (member (term (ch T_chs K_chs)) (term G_s))
+             (member (term (ch T_chr K_chr)) (term G_p)))))
     ;; XXX: need some sort of special 'suicide' command for threads
     ;; that backtrack past a par.
     (--> (D (G K T (in-hole E (par e_1 e_2))) P ...)
@@ -142,17 +149,27 @@
     (--> (D (G (name C (G_c K_c T_c E_c)) T (in-hole E (backtrack))) P ...)
          (,(backtrack-channels (term D) (term G_c)) C P ...)
          "Backtrack")
-    ;; XXX: These won't work; need something like member to test for
-    ;; channel in D
-    (--> ((D (ch backtrack T)) ((G (ch T_c K)) C T_s E) P ...)
-         ((D (ch backtrack T)) K)
+    (--> (D #;(D (ch backtrack T)) (G #;(G (ch T_c K)) C T_s E) P ...)
+         ((D ... (ch backtrack T)) K P ...)
          "Backtrack-GT"
-         (side-condition (> (term T_c) (term T))))
-    (--> ((D (ch backtrack T)) ((G (ch T_c K)) C T_s E) P ...)
-         ((D (ch idle T)) K P ...)
+         (side-condition 
+           (and 
+             (> (term T_c) (term T))
+             (member (term (ch backtrack T)) (term D))
+             (member (term (ch T_c K)) (term G)))))
+    (--> (D #;(D (ch backtrack T)) (G #;(G (ch T_c K)) C T_s E) P ...)
+         ((D ... (ch idle T)) K P ...)
          "Backtrack-EQ"
-         (side-condition (= (term T_c) (term T))))
-    (--> ((D (ch backtrack T)) (name K_p ((G (ch T_c K)) C T_s E)) P ...)
-         ((D (ch backtrack T_c)) K_p P ...)
+         (side-condition 
+           (and 
+             (= (term T_c) (term T))
+             (member (term (ch backtrack T)) (term D))
+             (member (term (ch T_c K)) (term G)))))
+    (--> (D #;(D (ch backtrack T)) (name K_p (G #;(G (ch T_c K)) C T_s E)) P ...)
+         ((D ... (ch backtrack T_c)) K_p P ...)
          "Backtrack-LT"
-         (side-condition (< (term T_c) (term T))))))
+         (side-condition 
+           (and 
+             (< (term T_c) (term T))
+             (member (term (ch backtrack T)) (term D))
+             (member (term (ch T_c K)) (term G)))))))
