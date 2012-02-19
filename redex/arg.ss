@@ -89,11 +89,44 @@
               (lambda (g_ch) `(,(car g_ch) backtrack ,(cadr g_ch)))]
            [else d_ch])) D))
 
+(define-metafunction arg 
+  subst : x any any -> any 
+  ;; 1. x_1 bound, so don't continue in λ body 
+  [(subst x_1 any_1 (lambda (x_1) any_2)) 
+   (lambda (x_1) any_2)] 
+  ;; 2. general purpose capture avoiding case 
+  [(subst x_1 any_1 (lambda (x_2) any_2)) 
+   (lambda (x_new)
+     (subst x_1 any_1 (subst x_2 x_new any_2))) 
+   (where (x_new) 
+      ,(variable-not-in 
+        (term (x_1 any_1 any_2))
+        (term x_2)))]
+  ;; 3. replace x_1 with e_1 
+  [(subst x_1 any_1 x_1) any_1] 
+  ;; the last cases cover all other expressions 
+  [(subst x_1 any_1 (any_2 ...)) ((subst x_1 any_1 any_2) ...)] 
+  [(subst x_1 any_1 any_2) any_2])
+
+
 ;; Judgment relation is D P => D' P'
 ;; (=> (D P) (D^ P^))
 (define step
   (reduction-relation
     arg
+    ;; First, some house keeping 
+    (--> (D (G K T (in-hole E (seq v_1 v_2))) P ...)
+         (D (G K T (in-hole E v_2)) P ...)
+         "seq")
+    (--> (D (G K T (in-hole E ((lambda (x) e) v))) P ...)
+         (D (G K T (in-hole E (subst x v e))) P ...)
+         "app")
+    ;; Now, the real rules
+    (--> (D (G K T (in-hole E (newChan))) P ...)
+         (((ch idle T) . D) (((ch K T) . G) K T (in-hole E ch)) P ...)
+         "newChan"
+          (where (ch)
+            ,(variable-not-in (term D) (term ch))))
     ;; XXX: Need to check ch is a member of D, can't use the informal
     ;; notation 
     (--> (D  ;(D (ch idle T))
@@ -110,15 +143,15 @@
            P ...)) ;; Other processes
          ,(term-let 
            ([time_m (+ 1 (max (term T_r) (term T_s)))]
-            [G_s^ (remove (term (ch T_chs K_chs)) G_s)]
-            [G_r^ (remove (term (ch T_chr K_chr)) G_r)])
+            [G_s^ (remove (term (ch T_chs K_chs)) (term G_s))]
+            [G_r^ (remove (term (ch T_chr K_chr)) (term G_r))])
            (term
              (D
-              (((G_s^ ... (ch time_m K_s))
+              ((((ch time_m K_s) . G_s^)
                 C_s
                 time_m 
                 (in-hole E_s unit)) ;; Send Process
-               ((G_r^ ... (ch time_m K_r))
+               (((ch time_m K_r) . G_r^)
                 C_r
                 time_m 
                 (in-hole E_r v)) ;; Receive Process
@@ -135,12 +168,12 @@
     ;; XXX: need some sort of special 'suicide' command for threads
     ;; that backtrack past a par.
     (--> (D (G K T (in-hole E (par e_1 e_2))) P ...)
-         (D (G K T (in-hole E e_1)) (empty empty min e_2) P ...)
+         (D (G K T (in-hole E e_1)) (()_ empty min e_2) P ...)
          "Par"
          (side-condition
            (none-backtracking (term D) (term G))))
     ;; XXX: Need to modify K to use e_2 
-    (--> (D (name K (G C T (in-hole E (choose e_1 e_2)))) P ...)
+    (--> (D (name K (G K_c T (in-hole E (choose e_1 e_2)))) P ...)
          (D (G K T (in-hole E e_1)))
          "Choose"
          (side-condition
@@ -150,7 +183,7 @@
          (,(backtrack-channels (term D) (term G_c)) C P ...)
          "Backtrack")
     (--> (D #;(D (ch backtrack T)) (G #;(G (ch T_c K)) C T_s E) P ...)
-         ((D ... (ch backtrack T)) K P ...)
+         (((ch backtrack T) . D) K P ...)
          "Backtrack-GT"
          (side-condition 
            (and 
@@ -158,7 +191,7 @@
              (member (term (ch backtrack T)) (term D))
              (member (term (ch T_c K)) (term G)))))
     (--> (D #;(D (ch backtrack T)) (G #;(G (ch T_c K)) C T_s E) P ...)
-         ((D ... (ch idle T)) K P ...)
+         (((ch idle T) . D) K P ...)
          "Backtrack-EQ"
          (side-condition 
            (and 
@@ -166,10 +199,12 @@
              (member (term (ch backtrack T)) (term D))
              (member (term (ch T_c K)) (term G)))))
     (--> (D #;(D (ch backtrack T)) (name K_p (G #;(G (ch T_c K)) C T_s E)) P ...)
-         ((D ... (ch backtrack T_c)) K_p P ...)
+         (((ch backtrack T_c) . D) K_p P ...)
          "Backtrack-LT"
          (side-condition 
            (and 
              (< (term T_c) (term T))
              (member (term (ch backtrack T)) (term D))
              (member (term (ch T_c K)) (term G)))))))
+
+
