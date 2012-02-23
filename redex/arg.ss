@@ -29,8 +29,11 @@
   ;;   much of the language is stateful.
   ;;
   (e (choose e e) (par e e) (newChan) (backtrack) (send ch v) (recv ch)
-     (e e) x v (seq e e))
+     (e e) x v (seq e e) ch (let ([x e] ...) e))
 
+  ;; For subst
+  (argany e v x ch)
+  
   ;; Values
   (v (lambda (x) e) number unit)
 
@@ -61,7 +64,11 @@
 
   ;; Evaluation contexts
   ;; XXX: Removed send; add it back later
-  (E hole (E e) (v E) (seq E e) (seq v E))
+  (E hole (E e) (v E) (seq E e) (seq v E) 
+     (let ([x v] ... [x E] [x e] ...)
+       e)
+     (let ([x v] ...)
+       E))
   
   ;; Tags
   (tag idle backtrack)
@@ -73,8 +80,9 @@
   (J (D P))
 
   ;; Variables
-  (x (variable-not-otherwise-mentioned)))
+  (x variable-not-otherwise-mentioned))
 
+;; TODO: These two might need to be meta-functions
 (define (none-backtracking D G)
   (map (lambda (x) 
          (cond
@@ -90,23 +98,23 @@
            [else d_ch])) D))
 
 (define-metafunction arg 
-  subst : x any any -> any 
+  subst : x argany argany -> argany 
   ;; 1. x_1 bound, so don't continue in λ body 
-  [(subst x_1 any_1 (lambda (x_1) any_2)) 
+  [(subst x_1 argany_1 (lambda (x_1) argany_2)) 
    (lambda (x_1) any_2)] 
   ;; 2. general purpose capture avoiding case 
-  [(subst x_1 any_1 (lambda (x_2) any_2)) 
+  [(subst x_1 argany_1 (lambda (x_2) argany_2)) 
    (lambda (x_new)
-     (subst x_1 any_1 (subst x_2 x_new any_2))) 
-   (where (x_new) 
+     (subst x_1 argany_1 (subst x_2 x_new argany_2))) 
+   (where x_new
       ,(variable-not-in 
-        (term (x_1 any_1 any_2))
+        (term (x_1 argany_1 argany_2))
         (term x_2)))]
   ;; 3. replace x_1 with e_1 
-  [(subst x_1 any_1 x_1) any_1] 
+  [(subst x_1 argany_1 x_1) argany_1] 
   ;; the last cases cover all other expressions 
-  [(subst x_1 any_1 (any_2 ...)) ((subst x_1 any_1 any_2) ...)] 
-  [(subst x_1 any_1 any_2) any_2])
+  [(subst x_1 argany_1 (argany_2 ...)) ((subst x_1 argany_1 argany_2) ...)] 
+  [(subst x_1 argany_1 argany_2) argany_2])
 
 
 ;; Judgment relation is D P => D' P'
@@ -121,90 +129,85 @@
     (--> (D (G K T (in-hole E ((lambda (x) e) v))) P ...)
          (D (G K T (in-hole E (subst x v e))) P ...)
          "app")
+    (--> (D (G K T (in-hole E (let () e_body))) P ...)
+         (D (G K T (in-hole E e_body)) P ...)
+         "let-base")
+    (--> (D (G K T (in-hole E (let ([x_1 v_1] ... [x v]) e_body))) P ...)
+         (D (G K T (in-hole E (let ([x_1 v_1] ... ) (subst x v e_body)))) P ...)
+         "let")
     ;; Now, the real rules
-    (--> (D (G K T (in-hole E (newChan))) P ...)
-         (((ch idle T) . D) (((ch K T) . G) K T (in-hole E ch)) P ...)
+    (--> ((D ...) ((G ...) K T (in-hole E (newChan))) P ...)
+         ((D ... (ch idle T)) ((G ... (ch K T)) K T (in-hole E ch)) P ...)
          "newChan"
-          (where (ch)
-            ,(variable-not-in (term D) (term ch))))
-    ;; XXX: Need to check ch is a member of D, can't use the informal
-    ;; notation 
-    (--> (D  ;(D (ch idle T))
+          (where ch
+            ,(variable-not-in (term (D ...)) (term ch))))
+    (--> ((D ... (ch idle T) D_1 ...)
           ((name K_s 
-                (G_s ;(G_s (ch T_chs K_chs))
+                ((G_s ... (ch T_chs K_chs) G_s1 ...)
                  K_cs
                  T_s
                  (in-hole E_s (send ch v)))) ;; Send Process
            (name K_r
-                 (G_p ;(G_p (ch T_chr K_chr))
+                 ((G_p ... (ch T_chr K_chr) G_p1 ...)
                   K_cr
                   T_r
                   (in-hole E_r (recv ch)))) ;; Receive Process
            P ...)) ;; Other processes
          ,(term-let 
-           ([time_m (+ 1 (max (term T_r) (term T_s)))]
-            [G_s^ (remove (term (ch T_chs K_chs)) (term G_s))]
-            [G_r^ (remove (term (ch T_chr K_chr)) (term G_r))])
+           ([time_m (+ 1 (max (term T_r) (term T_s)))])
            (term
-             (D
-              ((((ch time_m K_s) . G_s^)
+             ((D ... (ch idle T) D_1 ...)
+              ((((G_s ... (ch time_m K_s) G_s1 ...)
                 C_s
                 time_m 
                 (in-hole E_s unit)) ;; Send Process
-               (((ch time_m K_r) . G_r^)
+               ((G_p ... (ch time_m K_r) G_p1 ...)
                 C_r
                 time_m 
                 (in-hole E_r v)) ;; Receive Process
-               P ...))))
+               P ...)))))
          "Send/Recv"
          (side-condition
            (and 
-             (none-backtracking (term D) (term G_r))
-             (none-backtracking (term D) (term G_s))
-             ;; XXX: I'm not sure this works.
-             (member (term (ch idle T)) (term D))
-             (member (term (ch T_chs K_chs)) (term G_s))
-             (member (term (ch T_chr K_chr)) (term G_p)))))
+             (none-backtracking (term (D ...)) (term (G_p ... G_p1 ...)))
+             (none-backtracking (term (D ...)) (term (G_s ... G_s1 ...))))))
     ;; XXX: need some sort of special 'suicide' command for threads
     ;; that backtrack past a par.
-    (--> (D (G K T (in-hole E (par e_1 e_2))) P ...)
-         (D (G K T (in-hole E e_1)) (()_ empty min e_2) P ...)
+    (--> ((D ...) ((G ...) K T (in-hole E (par e_1 e_2))) P ...)
+         ((D ...) ((G ...) K T (in-hole E e_1)) (()_ empty min e_2) P ...)
          "Par"
          (side-condition
-           (none-backtracking (term D) (term G))))
-    ;; XXX: Need to modify K to use e_2 
-    (--> (D (name K (G K_c T (in-hole E (choose e_1 e_2)))) P ...)
-         (D (G K T (in-hole E e_1)))
+           (none-backtracking (term (D ...)) (term (G ...)))))
+    (--> ((D ...) ((G ...) K_c T (in-hole E (choose e_1 e_2))) P ...)
+         ((D ...) ((G ...) ((G ...) K_c T (in-hole E e_2)) T (in-hole E e_1)) P ...)
          "Choose"
          (side-condition
-           (none-backtracking (term D) (term G))))
-    ;; XXX: Need to define backtrack-channels
-    (--> (D (G (name C (G_c K_c T_c E_c)) T (in-hole E (backtrack))) P ...)
-         (,(backtrack-channels (term D) (term G_c)) C P ...)
+           (none-backtracking (term (D ...)) (term (G ...)))))
+    (--> ((D ...) ((G ...) (name C (G_c K_c T_c E_c)) T (in-hole E (backtrack))) P ...)
+         (,(backtrack-channels (term (D ...)) (term G_c)) C P ...)
          "Backtrack")
-    (--> (D #;(D (ch backtrack T)) (G #;(G (ch T_c K)) C T_s E) P ...)
-         (((ch backtrack T) . D) K P ...)
+    (--> ((D ... (ch backtrack T) D_1 ...) ((G ... (ch T_c K) G_1 ...) C T_s E) P ...)
+         ((D ... (ch backtrack T) D_1 ...) K P ...)
          "Backtrack-GT"
          (side-condition 
-           (and 
-             (> (term T_c) (term T))
-             (member (term (ch backtrack T)) (term D))
-             (member (term (ch T_c K)) (term G)))))
-    (--> (D #;(D (ch backtrack T)) (G #;(G (ch T_c K)) C T_s E) P ...)
-         (((ch idle T) . D) K P ...)
+             (> (term T_c) (term T))))
+    (--> ((D ... (ch backtrack T) D_1 ...) ((G ... (ch T_c K) G_1 ...) C T_s E) P ...)
+         ((D ... (ch idle T) D_1 ...) K P ...)
          "Backtrack-EQ"
          (side-condition 
-           (and 
-             (= (term T_c) (term T))
-             (member (term (ch backtrack T)) (term D))
-             (member (term (ch T_c K)) (term G)))))
-    (--> (D #;(D (ch backtrack T)) (name K_p (G #;(G (ch T_c K)) C T_s E)) P ...)
-         (((ch backtrack T_c) . D) K_p P ...)
+             (= (term T_c) (term T))))
+    (--> ((D ... (ch backtrack T) D_1 ...) (name K_p ((G ... (ch T_c K) G_1 ...) C T_s E)) P ...)
+         ((D ... (ch backtrack T_c) D_1 ...) K_p P ...)
          "Backtrack-LT"
          (side-condition 
-           (and 
-             (< (term T_c) (term T))
-             (member (term (ch backtrack T)) (term D))
-             (member (term (ch T_c K)) (term G)))))))
+             (< (term T_c) (term T))))))
+
+(define eval
+  (lambda (e_1)
+    (term-let ([((D ...) ((G ...) K T e_2) P ...)
+                (car (apply-reduction-relation step (term (() (() empty min ,e_1)))))])
+      (if (equal? (term e_2) e_1)
+          (eval (term e_2))
+          (term e_2)))))
 
 
