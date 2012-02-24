@@ -245,10 +245,18 @@
 ;;; Start of testing stuff 
 ;;; TODO: Should put this in another module.
 
+;; Example:
+;; (traces-eval (let ([x (newChan)]) (par (send x 1) (recv x))))
+;;
+;; Will show a graphical trace of reduction sequences
 (define-syntax traces-eval
   (syntax-rules ()
     [(_ x) (traces step (term (() ((() empty min x)))))]))
 
+;; Example:
+;; (eval (let ([x (newChan)]) (par (send x 1) (recv x)))) => '(unit 1)
+;;
+;; Returns a list of final values of all the processes
 (define-syntax eval
   (syntax-rules ()
     [(_ x) (arg-eval (term x))]))
