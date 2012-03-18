@@ -5,6 +5,9 @@
       \mbox{\textit{Continuation}} &
       \K & \defeq & \Kjudg{\S}{\E}
       \\[2pt]
+      \mbox{\textit{State}} &
+      \S & \defeq & \Ks;\T;\K_c;\Cs;\Cr
+      \\[2pt]
       \mbox{\textit{Parallel Threads}} &
       \P & \bnfdef & \Pjudg{\P}{\P} \bnfalt \K
       \\[2pt]
@@ -29,6 +32,7 @@
       \\[2pt]
       \mbox{\textit{Continuation Stack}} &
       \Ks & \bnfdef & \cdot \bnfalt \Ks[\T \mapsto \K]
+%      \Ks & \bnfdef & \cdot \bnfalt \Ks[\K]
       \\[2pt]
       \mbox{\textit{Channel State}} &
       \CH & \bnfdef & \cdot \bnfalt \CH[\chx \mapsto \ch]
@@ -91,6 +95,7 @@
 }
 
 \newcommand{\semantics}{
+<<<<<<< HEAD
    \fbox{\small$\judg{\CH}{\P}{\CHpr}{\Ppr}$} 
    \\[4pt]
    \begin{smathpar}
@@ -275,6 +280,8 @@
 %       }
 % 
 %   \end{smathpar}
+=======
+>>>>>>> d5443d4f7bed688bf0a82e440721126098a34867
 }
 
 \newcommand{\SyntaxFigure}[1][th]{

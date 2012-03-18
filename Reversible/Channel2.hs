@@ -40,7 +40,56 @@ module Reversible.Channel2 (
     | RecvBack
     | BackAck
     deriving (Eq,Show,Read)
-  
+
+  getState :: Channel a -> IO ChannelState
+  getState ch = do
+    ch <- readIORef ch
+    return $ case (compare(sendTime ch, recvTime ch),
+                   compare(sendTime ch, chanTime ch),
+                   compare(recvTime ch, chanTime ch)) of
+      -- Consistent
+      (EQ, EQ, EQ) ->
+      -- SendReq
+      (_, GT, EQ) ->
+      -- SendBack
+      (_, LT, EQ) ->
+      -- CommInt 
+      (LT, GT, _) ->
+      -- RecvAck
+      (EQ, GT, _) ->
+      -- RecvBack
+      (_, EQ, LT) ->
+      -- Back
+      (EQ, _, LT) ->
+      -- Intermediate states
+      -- SendBack1
+      (GT, LT, LT) ->
+      -- RecvInt2
+      (_, GT, LT) ->
+      -- RecvBack1
+      (LT, LT, LT) ->
+      -- Else should be an error
+       -- 0,0,0 < Consistent
+       -- 1,0,1 < Comm accept
+       -- 0,1,0 < Backtrack accept
+      EQ -> case compare(sendTime ch, chanTime ch) of
+              -- 0,0,0 < Consistent
+            EQ -> Consistent
+              -- 1,0,1 < Comm accept
+            GT -> CommAccept
+              -- 0,1,0 < Backtrack accept
+            LT -> BacktrackAccept
+       -- 0,1,1 < Send backtrack emit
+       -- 0,0,1 < Receive request
+      LT -> if sendTime ch < chanTime ch
+             then SendBacktrack
+             else RecvRequest
+       -- 1,0,0 < Send request
+       -- 1,1,0 < Receiver backtrack emit
+      GT -> if sendTime ch > chanTime ch
+             then SendRequest
+             else RecvBacktrack
+
   predList :: Channel_ a -> [Maybe ChannelState]
   predList ch = [consist, sendReq, recvReq, commAcc, recvBack,
                  sendBack, backAcc]
