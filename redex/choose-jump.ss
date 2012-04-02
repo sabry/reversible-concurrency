@@ -5,15 +5,11 @@
 (define-language choose-jump
   [e v (e e) (o1 e) (o2 e e) (seq e e) (if e e e) (let x = e in e)
           (err s) (choose k e e) (jump i k) (collect k)] 
-  ;; Expressions that can take a step without a parallel reduction. That
-  ;; is, they are not values, and they do not contain external jump 
-  ;; subexpressions or collect subexpressions in evaluation context.
-  ;; They can contain local jumps though. This seems like a little code
-  ;; duplication, but it seemed the cleanest way to eliminate the
-  ;; non-determinism
+  ;; The following are a 'pure' subset that can be evaluated as normal
+  ;; lambda-calculus expressions, without choose, jump, or collect.
   [e/p v e/p/v]
   [e/p/v (e/p e/p) (o1 e/p) (o2 e/p e/p) (seq e/p e) (if e/p e e) 
-       (let x = e/p in e) (err s) (choose k e e)]
+       (let x = e/p in e) (err s)]
   [o1 add1 sub1 iszero]
   [o2 + - * / ^]
   [b number true false]
@@ -78,90 +74,93 @@
   [(subst-var x_1 x_1 x_2) x_2]
   [(subst-var any_1 x_1 x_2) any_1])
 
-;; Per process Single-step reduction
+;; Single-step reduction for the pure lambda-calculus subset.
 (define-metafunction choose-jump
-  [(process-step (D (in-hole E (err s)))) (err s)
+  [(local-pure-red (in-hole E (err s))) (err s)
    (side-condition (not (equal? (term hole) (term E))))]
-  [(process-step (D (in-hole E ((lambda x e) v))))
-   (D (in-hole E (subst e x v)))]
-  [(process-step (D (in-hole E (o1 b)))) 
-   (D (in-hole E (delta (o1 b))))]
-  [(process-step (D (in-hole E (o2 b_1 b_2)))) 
-   (D (in-hole E (delta (o2 b_1 b_2))))]
-  [(process-step (D (in-hole E (seq v e)))) 
-   (D (in-hole E e))]
-  [(process-step (D (in-hole E (if true e_1 e_2)))) 
-   (D (in-hole E e_1))]
-  [(process-step (D (in-hole E (if false e_1 e_2)))) 
-   (D (in-hole E e_2))]
-  [(process-step (D (in-hole E (let x = v in e)))) 
-   (D (in-hole E (subst e x v)))]
-  [(process-step ((i ((k_0 e_0) ...)) (in-hole E (choose k e_1 e_2))))
-   ((i ((k_0 e_0) ... (k (in-hole E e_2)))) (in-hole E e_1))])
+  [(local-pure-red (in-hole E ((lambda x e) v)))
+   (in-hole E (subst e x v))]
+  [(local-pure-red (in-hole E (o1 b))) 
+   (in-hole E (delta (o1 b)))]
+  [(local-pure-red (in-hole E (o2 b_1 b_2))) 
+   (in-hole E (delta (o2 b_1 b_2)))]
+  [(local-pure-red (in-hole E (seq v e))) 
+   (in-hole E e)]
+  [(local-pure-red (in-hole E (if true e_1 e_2))) 
+   (in-hole E e_1)]
+  [(local-pure-red (in-hole E (if false e_1 e_2))) 
+   (in-hole E e_2)]
+  [(local-pure-red (in-hole E (let x = v in e))) 
+   (in-hole E (subst e x v))])
 
-;; Single-step reduction for local reductions.
+;; Extend a relation with rules that touch only their own stores, but
+;; don't interact with other processes.
+(define-syntax local-extend-reduction
+  (syntax-rules (-->)
+    [(_ relation (--> e1 e2) ...)
+     (extend-reduction-relation 
+       relation choose-jump
+       (--> (par P_0 (... ...) e1 P_1 (... ...))
+            (par P_0 (... ...) e2 P_1 (... ...))) ...)]))
+
+;; Base reduction; nothing more than parallel lambda-calculus.
 (define choose-red-base
   (reduction-relation
    choose-jump
-   ;; Completely local reductions including choose. Not sure choose
-   ;; should be included in process-step; maybe it should just handle
-   ;; the uninteresting lambda calculus stuff without
-   ;; choose/jump/collect. Might be best to put it in here instead, like
-   ;; we do with local jumps.
-   (--> (par P_0 ... (name t ((i ((k e_1) ...)) (in-hole E e/p/v))) P_1 ...)
-        (par P_0 ... (process-step t) P_1 ...))
-   ;; Local jumps
-   (--> (par P_0 ... ((i ((k e) ... (k_1 e_1) (k_2 e_2) ...)) 
-                      (in-hole E (jump i k_1))) P_1 ...)
-        (par P_0 ... ((i ((k e) ... (k_1 e_1) (k_2 e_2) ...))
-                      e_1) P_1 ...))
-   ;; Local collects
-   (--> (par P_0 ... ((i ((k_0 e_0) ... (k_1 e_1) (k_2 e_2) ...)) 
-                      (in-hole E (collect k_1))) P_1 ...)
-        (par P_0 ... ((i ((k_0 e_0) ... (k_2 e_2) ...)) (in-hole E unit)) 
-             P_1 ...))))
+   (--> (par P_0 ... ((name S (i ((k e) ...))) (name exp (in-hole E e/p/v)))
+             P_1 ...)
+        (par P_0 ... (S (local-pure-red exp)) P_1 ...))))
 
-;; Used to extend the parallel relation symmetrically -- allowing the
+;; Extend the parallel langauge with local reductions. These reductions
+;; might touch their own stores, but not other processes.
+(define choose-red-local
+  (local-extend-reduction
+    choose-red-base
+    ;; local choose
+    (--> ((i ((k_0 e_0) ...)) (in-hole E (choose k e_1 e_2)))
+         ((i ((k_0 e_0) ... (k (in-hole E e_2)))) (in-hole E e_1)))
+    ;; local collect
+    (--> ((i ((k_0 e_0) ... (k_1 e_1) (k_2 e_2) ...)) 
+          (in-hole E (collect k_1)))
+         ((i ((k_0 e_0) ... (k_2 e_2) ...)) (in-hole E unit)))
+    ;; local jump
+    (--> ((i ((k e) ... (k_1 e_1) (k_2 e_2) ...)) (in-hole E (jump i k_1)))
+         ((i ((k e) ... (k_1 e_1) (k_2 e_2) ...)) e_1))))
+
+;; Used to extend the parallel relation symmetrically--allowing the
 ;; rule to match no matter the process order
 (define-syntax symmetric-extend-relation
   (syntax-rules (--> par)
-    [(_ relation (--> (par e1 e2) (par e3 e4)))
+    [(_ relation (--> (par e1 e2) (par e3 e4)) ...)
      (extend-reduction-relation 
        relation choose-jump
        (--> (par P_0 (... ...) e1 P_1 (... ...) e2 P_2 (... ...))
-            (par P_0 (... ...) e3 P_1 (... ...) e4 P_2 (... ...)))
+            (par P_0 (... ...) e3 P_1 (... ...) e4 P_2 (... ...))) ...
        (--> (par P_0 (... ...) e2 P_1 (... ...) e1 P_2 (... ...))
-            (par P_0 (... ...) e4 P_1 (... ...) e3 P_2 (... ...))))]))
+            (par P_0 (... ...) e4 P_1 (... ...) e3 P_2 (... ...))) ...)]))
 
-;; Extend the base with parallel jumps
-(define choose-red-jump
+;; Extend the base with parallel reductions that interact with other
+;; processes and stores.
+(define choose-red-parallel
   (symmetric-extend-relation
-    choose-red-base
+    choose-red-local
+    ;; Parallel jumps
     (--> (par ((i_0 ((k_2 e_2) ... (k_1 e_1) (k_3 e_3) ...))
                (in-hole E_4 e))
               ((i_1 ((k_0 e_0) ...)) (in-hole E_5 (jump i_0 k_1))))
          (par ((i_0 ((k_2 e_2) ... (k_1 e_1) (k_3 e_3) ...)) e_1)
-              ((i_1 ((k_0 e_0) ...)) (in-hole E_5 unit))))))
-
-;; Extend that with parallel collects
-(define choose-red-jump-collect
-  (symmetric-extend-relation
-    choose-red-jump
+              ((i_1 ((k_0 e_0) ...)) (in-hole E_5 unit))))
+    ;; Parallel collect
     (--> (par ((i_0 ((k_0 e_0) ... (k_1 e_1) (k_2 e_2) ...)) 
                (in-hole E_0 e))
               ((i_1 ((k_3 e_3) ...)) (in-hole E_1 (collect k_1))))
          (par ((i_0 ((k_0 e_0) ... (k_2 e_2) ...)) (in-hole E_0 e))
               ((i_1 ((k_3 e_3) ...)) (in-hole E_1 unit))))))
 
-(define-syntax sr-term
-   (syntax-rules ()
-     [(sr-term id exp) (term ((id ()) exp))]
-     [(sr-term exp) (term ((i ()) exp))] ))
-
 (define-syntax par-term
   (syntax-rules (id)
-    [(_ (id i exp) ...) (term (par ,(sr-term i exp) ...))]
-    [(_ exp ...) (term (par ,(sr-term i exp) ...))] ))
+    [(_ (id i exp) ...) (term (par ((i ()) exp) ...))]
+    [(_ exp ...) (term (par ((i ()) exp) ...))] ))
 
 ;; A few small examples
 (define e0 (par-term 3))
@@ -206,4 +205,4 @@
    (id i_2 (sub1 (choose k_3 4 5)))))
 
 ;; Here is how to view the evaluation of the example expressions
-(traces choose-red-jump-collect e21)
+(traces choose-red-parallel e21)
