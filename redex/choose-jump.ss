@@ -4,7 +4,7 @@
 ;; Abstract syntax
 (define-language choose-jump
   [e v (e e) (o1 e) (o2 e e) (seq e e) (if e e e) (let x = e in e)
-          (err s) (choose k e e) (jump i k) (collect k) (jump k)] 
+          (err s) (choose k e e) (jump i k) (collect k)] 
   ;; Expressions that can take a step without a parallel reduction. That
   ;; is, they are not values, and they do not contain external jump 
   ;; subexpressions or collect subexpressions in evaluation context.
@@ -13,7 +13,7 @@
   ;; non-determinism
   [e/p v e/p/v]
   [e/p/v (e/p e/p) (o1 e/p) (o2 e/p e/p) (seq e/p e) (if e/p e e) 
-       (let x = e/p in e) (err s) (choose k e e) (jump k)]
+       (let x = e/p in e) (err s) (choose k e e)]
   [o1 add1 sub1 iszero]
   [o2 + - * / ^]
   [b number true false]
@@ -97,21 +97,25 @@
   [(process-step (D (in-hole E (let x = v in e)))) 
    (D (in-hole E (subst e x v)))]
   [(process-step ((i ((k_0 e_0) ...)) (in-hole E (choose k e_1 e_2))))
-   ((i ((k_0 e_0) ... (k (in-hole E e_2)))) (in-hole E e_1))]
-  [(process-step ((i ((k_0 e_0) ... (k_1 e_1) (k_2 e_2) ...)) 
-                  (in-hole E (jump k_1))))      
-   ((i ((k_0 e_0) ... (k_1 e_1) (k_2 e_2) ...)) (in-hole E e_1))])
+   ((i ((k_0 e_0) ... (k (in-hole E e_2)))) (in-hole E e_1))])
 
 ;; Single-step reduction for local reductions.
 (define choose-red-base
   (reduction-relation
    choose-jump
+   ;; Completely local reductions including choose. Not sure choose
+   ;; should be included in process-step; maybe it should just handle
+   ;; the uninteresting lambda calculus stuff without
+   ;; choose/jump/collect. Might be best to put it in here instead, like
+   ;; we do with local jumps.
    (--> (par P_0 ... (name t ((i ((k e_1) ...)) (in-hole E e/p/v))) P_1 ...)
         (par P_0 ... (process-step t) P_1 ...))
-   ;; Turn jumps in our thread into the internal jump form, so
-   ;; process-step will work correctly.
-   (--> (par P_0 ... ((i ((k e) ...)) (in-hole E (jump i k_1))) P_1 ...)
-        (par P_0 ... ((i ((k e) ...)) (in-hole E (jump k_1))) P_1 ...))
+   ;; Local jumps
+   (--> (par P_0 ... ((i ((k e) ... (k_1 e_1) (k_2 e_2) ...)) 
+                      (in-hole E (jump i k_1))) P_1 ...)
+        (par P_0 ... ((i ((k e) ... (k_1 e_1) (k_2 e_2) ...))
+                      e_1) P_1 ...))
+   ;; Local collects
    (--> (par P_0 ... ((i ((k_0 e_0) ... (k_1 e_1) (k_2 e_2) ...)) 
                       (in-hole E (collect k_1))) P_1 ...)
         (par P_0 ... ((i ((k_0 e_0) ... (k_2 e_2) ...)) (in-hole E unit)) 
@@ -129,8 +133,7 @@
        (--> (par P_0 (... ...) e2 P_1 (... ...) e1 P_2 (... ...))
             (par P_0 (... ...) e4 P_1 (... ...) e3 P_2 (... ...))))]))
 
-;; Now we can extend the parallel reduction by just specifying two
-;; processes we care about. Much better
+;; Extend the base with parallel jumps
 (define choose-red-jump
   (symmetric-extend-relation
     choose-red-base
@@ -140,6 +143,7 @@
          (par ((i_0 ((k_2 e_2) ... (k_1 e_1) (k_3 e_3) ...)) e_1)
               ((i_1 ((k_0 e_0) ...)) (in-hole E_5 unit))))))
 
+;; Extend that with parallel collects
 (define choose-red-jump-collect
   (symmetric-extend-relation
     choose-red-jump
