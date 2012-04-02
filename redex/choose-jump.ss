@@ -93,6 +93,13 @@
   [(local-pure-red (in-hole E (let x = v in e))) 
    (in-hole E (subst e x v))])
 
+;; Base reduction; nothing more than parallel lambda-calculus.
+(define choose-red-base
+  (reduction-relation
+   choose-jump
+   (--> (par P_0 ... (D (name exp (in-hole E e/p/v))) P_1 ...)
+        (par P_0 ... (D (local-pure-red exp)) P_1 ...))))
+
 ;; Extend a relation with rules that touch only their own stores, but
 ;; don't interact with other processes.
 (define-syntax local-extend-reduction
@@ -102,14 +109,6 @@
        relation choose-jump
        (--> (par P_0 (... ...) e1 P_1 (... ...))
             (par P_0 (... ...) e2 P_1 (... ...))) ...)]))
-
-;; Base reduction; nothing more than parallel lambda-calculus.
-(define choose-red-base
-  (reduction-relation
-   choose-jump
-   (--> (par P_0 ... ((name S (i ((k e) ...))) (name exp (in-hole E e/p/v)))
-             P_1 ...)
-        (par P_0 ... (S (local-pure-red exp)) P_1 ...))))
 
 ;; Extend the parallel langauge with local reductions. These reductions
 ;; might touch their own stores, but not other processes.
