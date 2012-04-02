@@ -13,7 +13,7 @@
   ;; non-determinism
   [e/p v e/p/v]
   [e/p/v (e/p e/p) (o1 e/p) (o2 e/p e/p) (seq e/p e) (if e/p e e) 
-       (let x = e/p in e) (err s) (choose k e/p e/p) (jump k)]
+       (let x = e/p in e) (err s) (choose k e e) (jump k)]
   [o1 add1 sub1 iszero]
   [o2 + - * / ^]
   [b number true false]
@@ -102,19 +102,23 @@
                   (in-hole E (jump k_1))))      
    ((i ((k_0 e_0) ... (k_1 e_1) (k_2 e_2) ...)) (in-hole E e_1))])
 
-;; Single-step reduction
+;; Single-step reduction for local reductions.
 (define choose-red-base
   (reduction-relation
    choose-jump
    (--> (par P_0 ... (name t ((i ((k e_1) ...)) (in-hole E e/p/v))) P_1 ...)
         (par P_0 ... (process-step t) P_1 ...))
+   ;; Turn jumps in our thread into the internal jump form, so
+   ;; process-step will work correctly.
+   (--> (par P_0 ... ((i ((k e) ...)) (in-hole E (jump i k_1))) P_1 ...)
+        (par P_0 ... ((i ((k e) ...)) (in-hole E (jump k_1))) P_1 ...))
    (--> (par P_0 ... ((i ((k_0 e_0) ... (k_1 e_1) (k_2 e_2) ...)) 
                       (in-hole E (collect k_1))) P_1 ...)
         (par P_0 ... ((i ((k_0 e_0) ... (k_2 e_2) ...)) (in-hole E unit)) 
              P_1 ...))))
 
 ;; Used to extend the parallel relation symmetrically -- allowing the
-;; rule to match on either side
+;; rule to match no matter the process order
 (define-syntax symmetric-extend-relation
   (syntax-rules (--> par)
     [(_ relation (--> (par e1 e2) (par e3 e4)))
@@ -179,9 +183,23 @@
     (id i_1 (add1 (choose k 1 2)))
     (id i_2 (add1 (seq (jump i_1 k) 2)))))
 (define e19 
+  (par-term 
+    (id i_1 (add1 (seq (jump i_2 k) 2)))
+    (id i_2 (add1 (choose k 1 2)))))
+(define e20 
   (par-term
     (id i_1 (add1 (choose k 1 2)))
     (id i_2 (seq (collect k) (add1 2)))))
+(define e21
+  (par-term
+   (id i_1 
+       (add1 (choose k_1 
+                     (add1 (choose k_2 
+                                   (seq (jump i_2 k_3) 
+                                        (seq (jump i_1 k_1) 10)) 
+                                   20)) 
+                     30)))
+   (id i_2 (sub1 (choose k_3 4 5)))))
 
 ;; Here is how to view the evaluation of the example expressions
-(traces choose-red-jump-collect e19)
+(traces choose-red-jump-collect e21)
