@@ -18,7 +18,11 @@
   [k (variable-prefix k)]
   [i (variable-prefix i)]
   [D (i ((k F) ...))]
+  ;; P and Q are a hack. We need a way to ensure the reduction relation
+  ;; doesn't try process-step unless the thread has an expression that
+  ;; is not a value, otherwise we get lots of circularity.
   [P (D e)]
+  [Q (D e/v)]
   [x variable-not-otherwise-mentioned])
 
 ;; Application of primitive functions
@@ -113,8 +117,20 @@
 (define shift-reset-red
   (reduction-relation
    shift-reset
-   (--> (par P_0 ... P_1 P_2 ...)
-        (par P_0 ... (process-step P_1) P_2 ...))
+   ;; More circularity: We need a way to prevent process-step from being
+   ;; tried when it can't do anything. P and Q were an attempt at this,
+   ;; but it still happens if the expression in a process's hole is
+   ;; asking another thread to jump. Maybe another evaluation context
+   ;; that excludes such a jump and values, like:
+   ;;
+   ;; [T hole (T e) (v T) (o1 T) (o2 T e) (o2 v T) (if T e e)
+   ;;  (seq T e) (let x = T in e) (reset T) (jump i k T)] where i !=
+   ;;  current process ID
+   ;;
+   ;; Seems like we'd need another syntactic form for jump to preclude
+   ;; such a case though. And that's not nearly as elegent.
+   (--> (par P_0 ... Q P_2 ...)
+        (par P_0 ... (process-step Q) P_2 ...))
    ;; This doesn't quite work, unless we want to allow sending
    ;; continuations (which sounds like an interesting idea by itself
    ;; but...). We need some way to communicate continuation id's, so we
@@ -134,32 +150,33 @@
    ;; Need two rules, to deal with either order. This should be
    ;; abstracted in someway to allow me to write 1 function/macro that
    ;; creates both of these rules, for arbitrary thread contexts.
-   ;; Something like
+   ;; Something like:
    ;; (lambda (T1 T2 T1' T2')
    ;;   ((--> (par P_0 ... T1 P_1 ... T2 P_2 ...)
    ;;         (par P_0 ... T1' P_2 ... T2' P_2 ...))
    ;;    (--> (par P_0 ... T2 P_1 ... T1 P_2 ...)
    ;;         (par P_0 ... T2' P_1 ... T1' P_2 ...))))
-   (--> (par P_0 ... ((i_0 ((k_3 F_3) ... (k_1 F_1) (k_4 F_4) ...))
-                      (in-hole E e))  
+   ;; I think we could use extend-reduction to help abstract that.
+   (--> (par P_0 ... ((i_0 ((k_2 F_2) ... (k_1 F_1) (k_3 F_3) ...))
+                      (in-hole E_0 e)) 
              P_1 ... ((i_1 ((k_0 F_0) ...)) 
-                      (in-hole E (jump i_0 k_1 v)))
+                      (in-hole E_1 (jump i_0 k_1 v)))
              P_2 ...)
-        (par P_0 ... ((i_0 ((k_3 F_3) ... (k_1 F_1) (k_4 F_4) ...))
-                      (in-hole E (in-hole F v)))
+        (par P_0 ... ((i_0 ((k_2 F_2) ... (k_1 F_1) (k_3 F_3) ...))
+                      (in-hole E_0 (in-hole F_1 v))) 
              P_1 ... ((i_1 ((k_0 F_0) ...)) 
-                      (in-hole E unit))
+                      (in-hole E_1 unit))
              P_2 ...)
         (side-condition (not (equal? (term i_0) (term i_1)))))
    (--> (par P_0 ... ((i_1 ((k_0 F_0) ...)) 
-                      (in-hole E (jump i_0 k_1 v))) 
+                      (in-hole E_1 (jump i_0 k_1 v))) 
              P_1 ... ((i_0 ((k_2 F_2) ... (k_1 F_1) (k_3 F_3) ...))
-                      (in-hole E e))
+                      (in-hole E_0 e))
              P_2 ...)
         (par P_0 ... ((i_1 ((k_0 F_0) ...)) 
-                      (in-hole E unit))
+                      (in-hole E_1 unit))
              P_1 ... ((i_0 ((k_2 F_2) ... (k_1 F_1) (k_3 F_3) ...))
-                      (in-hole E (in-hole F v)))
+                      (in-hole E_0 (in-hole F_1 v)))
              P_2 ...)
         (side-condition (not (equal? (term i_0) (term i_1)))))))
 
@@ -195,10 +212,13 @@
 (define e17 (par-term (reset (add1 (shift k (jump i k (jump i k 2)))))))
 (define e18 (par-term (add1 (reset (sub1 (shift k (jump i k (jump i k 2))))))))
 (define e19 (par-term (reset (add1 (shift k (iszero (- 10 (jump i k 7))))))))
-(define e20 (par-term 
-              (id i_1 
-                  (reset (add1 (shift k_1 (iszero (- 10 (jump i_2 k_2 7)))))))
-              (id i_2 
-                  (reset (add1 (shift k_2 (iszero 0)))))))
+(define e20 
+  (par-term 
+    (id i_1 
+        (reset (add1 (shift k_1 (iszero (- 10 
+                                           (seq (jump i_2 k_2 7) 
+                                                (jump i_1 k_1 7))))))))
+    (id i_2 
+        (reset (add1 (shift k_2 (iszero 0)))))))
 ;; Here is how to view the evaluation of the example expressions
 (traces shift-reset-red e20)
