@@ -6,13 +6,14 @@
   [e v (e e) (o1 e) (o2 e e) (seq e e) (if e e e) (let x = e in e)
           (err s) (choose k e e) (jump i k) (collect k) (jump k)] 
   ;; Expressions that can take a step without a parallel reduction. That
-  ;; is, they are not values, and they do not contain any jump i k
-  ;; subexpressions. They can contain local jumps though. This seems
-  ;; like a little code duplication, but it was the cleanest way to
-  ;; eliminate the non-determinism
+  ;; is, they are not values, and they do not contain external jump 
+  ;; subexpressions or collect subexpressions in evaluation context.
+  ;; They can contain local jumps though. This seems like a little code
+  ;; duplication, but it seemed the cleanest way to eliminate the
+  ;; non-determinism
   [e/p v e/p/v]
-  [e/p/v (e/p e/p) (o1 e/p) (o2 e/p e/p) (seq e/p e/p) (if e/p e/p e/p) 
-       (let x = e/p in e/p) (err s) (choose k e/p e/p) (jump k)]
+  [e/p/v (e/p e/p) (o1 e/p) (o2 e/p e/p) (seq e/p e) (if e/p e e) 
+       (let x = e/p in e) (err s) (choose k e/p e/p) (jump k)]
   [o1 add1 sub1 iszero]
   [o2 + - * / ^]
   [b number true false]
@@ -68,10 +69,6 @@
      (subst (subst-var any_3 x_1 x_3) x_2 any_2))
    (where x_3 ,(variable-not-in (term (x_2 any_3 any_2))
                                 (term x_1)))]
-  #;[(subst (shift x_1 any_1) x_1 any_2) (shift x_1 any_1)]
-  #;[(subst (shift x_1 any_1) x_2 any_2)
-   (shift x_3 (subst (subst-var any_1 x_1 x_3) x_2 any_2))
-   (where x_3 ,(variable-not-in (term (x_2 any_1 any_2)) (term x_1)))]
   [(subst x_1 x_1 any_1) any_1]
   [(subst (any_2 ...) x_1 any_1) ((subst any_2 x_1 any_1) ...)]
   [(subst any_2 x_1 any_1) any_2])
@@ -103,19 +100,18 @@
    ((i ((k_0 e_0) ... (k (in-hole E e_2)))) (in-hole E e_1))]
   [(process-step ((i ((k_0 e_0) ... (k_1 e_1) (k_2 e_2) ...)) 
                   (in-hole E (jump k_1))))      
-   ((i ((k_0 e_0) ... (k_1 e_1) (k_2 e_2) ...)) (in-hole E e_1))]
-  ;; Maybe this rule should be a parallel rule. What if another process
-  ;; says we can collect k?
-  [(process-step ((i ((k_0 e_0) ... (k_1 e_1) (k_2 e_2) ...)) 
-                  (in-hole E (collect k_1))))      
-   ((i ((k_0 e_0) ... (k_2 e_2) ...)) (in-hole E unit))])
+   ((i ((k_0 e_0) ... (k_1 e_1) (k_2 e_2) ...)) (in-hole E e_1))])
 
 ;; Single-step reduction
 (define choose-red-base
   (reduction-relation
    choose-jump
-   (--> (par P_0 ... (name t ((i ((k e_1) ...)) (in-hole E e/p/v))) P_2 ...)
-        (par P_0 ... (process-step t) P_2 ...))))
+   (--> (par P_0 ... (name t ((i ((k e_1) ...)) (in-hole E e/p/v))) P_1 ...)
+        (par P_0 ... (process-step t) P_1 ...))
+   (--> (par P_0 ... ((i ((k_0 e_0) ... (k_1 e_1) (k_2 e_2) ...)) 
+                      (in-hole E (collect k_1))) P_1 ...)
+        (par P_0 ... ((i ((k_0 e_0) ... (k_2 e_2) ...)) (in-hole E unit)) 
+             P_1 ...))))
 
 ;; Used to extend the parallel relation symmetrically -- allowing the
 ;; rule to match on either side
@@ -177,13 +173,15 @@
 (define e14 (par-term (let x = 6 in (let y = 2 in (/ x y)))))
 (define e15 (par-term (let x = 6 in (let y = 0 in (add1 (/ x y))))))
 (define e16 (par-term (add1 (choose k 1 2))))
-(define e17 
+(define e17 (par-term (seq (choose k 1 2) (collect k))))
+(define e18 
   (par-term 
     (id i_1 (add1 (choose k 1 2)))
     (id i_2 (add1 (seq (jump i_1 k) 2)))))
-(define e18 
+(define e19 
   (par-term
     (id i_1 (add1 (choose k 1 2)))
     (id i_2 (seq (collect k) (add1 2)))))
+
 ;; Here is how to view the evaluation of the example expressions
-(traces choose-red-jump-collect e18)
+(traces choose-red-jump-collect e19)
