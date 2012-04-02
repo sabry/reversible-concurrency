@@ -4,23 +4,21 @@
 ;; Abstract syntax
 (define-language shift-reset
   [e/v (e e) (o1 e) (o2 e e) (seq e e) (if e e e) (let x = e in e) (err s)
-     (shift k e) (reset e) (jump i k e) (collect k)
-     (let-match (x x) = e in e) (send v i k) (recv i k)]
+     (shift k e) (reset e) (jump i k e) (collect k)]
   [e e/v v]
   [o1 add1 sub1 iszero]
   [o2 + - * / ^]
   [b number true false]
   [s string]
-  [v b x (lambda x e) k (cons v_1 v_2) ()]
+  [v b x (lambda x e) k unit]
   [E hole (E e) (v E) (o1 E) (o2 E e) (o2 v E) (if E e e)
-     (seq E e) (let x = E in e) (reset E) (jump i k E)
-     (let-match (x x) = E in e)]
+     (seq E e) (let x = E in e) (reset E) (jump i k E)]
   [F hole (F e) (v F) (o1 F) (o2 F e) (o2 v F) (if F e e)
-     (seq F e) (let x = F in e) (let-match (x x) = F in e)]
+     (seq F e) (let x = F in e)]
   [k (variable-prefix k)]
   [i (variable-prefix i)]
   [D (i ((k F) ...))]
-  [P (D e/v)]
+  [P (D e)]
   [x variable-not-otherwise-mentioned])
 
 ;; Application of primitive functions
@@ -108,7 +106,7 @@
     (in-hole E (in-hole F_1 v)))]
   [(process-step ((i ((k_0 F_0) ... (k_1 F_1) (k_2 F_2) ...)) 
                   (in-hole E (collect k_1))))      
-   ((i ((k_0 F_0) ... (k_2 F_2) ...)) (in-hole E ()))]
+   ((i ((k_0 F_0) ... (k_2 F_2) ...)) (in-hole E unit))]
   [(process-step (D (in-hole E v))) (D (in-hole E v))])
 
 ;; Single-step reduction
@@ -144,23 +142,23 @@
    ;;         (par P_0 ... T2' P_1 ... T1' P_2 ...))))
    (--> (par P_0 ... ((i_0 ((k_3 F_3) ... (k_1 F_1) (k_4 F_4) ...))
                       (in-hole E e))  
-             P_1 ... ((i_1 ((k_0 F_0) ... (k_1 F_1) (k_2 F_2) ...)) 
+             P_1 ... ((i_1 ((k_0 F_0) ...)) 
                       (in-hole E (jump i_0 k_1 v)))
              P_2 ...)
         (par P_0 ... ((i_0 ((k_3 F_3) ... (k_1 F_1) (k_4 F_4) ...))
                       (in-hole E (in-hole F v)))
-             P_1 ... ((i_1 ((k_0 F_0) ... (k_1 F_1) (k_2 F_2) ...)) 
-                      (in-hole E ()))
+             P_1 ... ((i_1 ((k_0 F_0) ...)) 
+                      (in-hole E unit))
              P_2 ...)
         (side-condition (not (equal? (term i_0) (term i_1)))))
-   (--> (par P_0 ... ((i_1 ((k_0 F_0) ... (k_1 F_1) (k_2 F_2) ...)) 
+   (--> (par P_0 ... ((i_1 ((k_0 F_0) ...)) 
                       (in-hole E (jump i_0 k_1 v))) 
-             P_1 ... ((i_0 ((k_3 F_3) ... (k_1 F_1) (k_4 F_4) ...))
+             P_1 ... ((i_0 ((k_2 F_2) ... (k_1 F_1) (k_3 F_3) ...))
                       (in-hole E e))
              P_2 ...)
-        (par P_0 ... ((i_1 ((k_0 F_0) ... (k_1 F_1) (k_2 F_2) ...)) 
-                      (in-hole E ()))
-             P_1 ... ((i_0 ((k_3 F_3) ... (k_1 F_1) (k_4 F_4) ...))
+        (par P_0 ... ((i_1 ((k_0 F_0) ...)) 
+                      (in-hole E unit))
+             P_1 ... ((i_0 ((k_2 F_2) ... (k_1 F_1) (k_3 F_3) ...))
                       (in-hole E (in-hole F v)))
              P_2 ...)
         (side-condition (not (equal? (term i_0) (term i_1)))))))
@@ -199,8 +197,8 @@
 (define e19 (par-term (reset (add1 (shift k (iszero (- 10 (jump i k 7))))))))
 (define e20 (par-term 
               (id i_1 
-                  (reset (add1 (shift k (iszero (- 10 (jump i k 7)))))))
+                  (reset (add1 (shift k_1 (iszero (- 10 (jump i_2 k_2 7)))))))
               (id i_2 
-                  ())))
+                  (reset (add1 (shift k_2 (iszero 0)))))))
 ;; Here is how to view the evaluation of the example expressions
-(traces shift-reset-red e19)
+(traces shift-reset-red e20)
