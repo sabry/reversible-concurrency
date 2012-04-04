@@ -4,14 +4,15 @@
 ;; Abstract syntax
 (define-language choose-jump
   [e v (e e) (o1 e) (o2 e e) (seq e e) (if e e e) (let x = e in e)
-          (err s) (choose k e e) (jump i k) (collect k)] 
+          (err s) (choose k e e) (jump i k) (collect k)
+          (send i v) (recv i)] 
   ;; The following are a 'pure' subset that can be evaluated as normal
   ;; lambda-calculus expressions, without choose, jump, or collect.
   [e/p v e/p/v]
   [e/p/v (e/p e/p) (o1 e/p) (o2 e/p e/p) (seq e/p e) (if e/p e e) 
        (let x = e/p in e) (err s)]
   [o1 add1 sub1 iszero]
-  [o2 + - * / ^]
+  [o2 + - * / ^ eq?]
   [b number true false]
   [s string]
   [v b x (lambda x e) k unit]
@@ -50,7 +51,8 @@
   [(delta (/ v_1 v_2)) (err "/ applied to non-numbers")]
   [(delta (^ b_1 b_2)) ,(expt (term b_1) (term b_2))
           (side-condition (and (number? (term b_1)) (number? (term b_2))))]
-  [(delta (^ v_1 v_2)) (err "^ applied to non-numbers")])
+  [(delta (^ v_1 v_2)) (err "^ applied to non-numbers")]
+  [(delta (eq? v_1 v_2)) ,(eq? (term v_1) (term v_2))])
 
 ;; Substitution
 (define-metafunction choose-jump
@@ -154,7 +156,11 @@
                (in-hole E_0 e))
               ((i_1 ((k_3 e_3) ...)) (in-hole E_1 (collect k_1))))
          (par ((i_0 ((k_0 e_0) ... (k_2 e_2) ...)) (in-hole E_0 e))
-              ((i_1 ((k_3 e_3) ...)) (in-hole E_1 unit))))))
+              ((i_1 ((k_3 e_3) ...)) (in-hole E_1 unit))))
+    ;; Send/recv
+    (--> (par ((name S0 (i_0 ((k_0 e_0) ...))) (in-hole E_0 (send i_1 v)))
+              ((name S1 (i_1 ((k_1 e_1) ...))) (in-hole E_1 (recv i_0))))
+         (par (S0 (in-hole E_0 unit)) (S1 (in-hole E_1 v))))))
 
 (define-syntax par-term
   (syntax-rules (id)
@@ -203,5 +209,30 @@
                      30)))
    (id i_2 (sub1 (choose k_3 4 5)))))
 
+(define e22
+  (par-term
+    (id i_1 (choose k (send i_2 0) (send i_2 120)))
+    (id i_2
+        (let x = (recv i_1) in
+          (if (iszero x)
+            (let x = (seq (jump i_1 k) (recv i_1))
+              in (seq (collect k) x))
+            x)))))
+
+;; Here's how I would like to write programs
+#;(define e23
+  (par-term
+    (id i_1 (choose
+              (seq (send i_2 0)
+                   (let x = (recv i_2) in 
+                     (if (eq? x 5)
+                       120
+                       (backtrack))))
+              (seq (send i_2 1)
+                   (recv i_2))))
+    (id i_2
+        (let x = (recv i_1)
+          (choose (send i_1 6) (send i_1 120))))))
+
 ;; Here is how to view the evaluation of the example expressions
-(traces choose-red-parallel e21)
+(traces choose-red-parallel e23)
