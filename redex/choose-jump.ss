@@ -2,14 +2,14 @@
 (require redex)
 
 ;; Abstract syntax
-(define-language choose-jump
-  [e v (e e) (o1 e) (o2 e e) (seq e e) (if e e e) (let x = e in e)
-          (err s) (choose k e e) (jump i k) (collect k)
+(define-language checkpoint-jump
+  [e v (e e) (o1 e) (o2 e e) (seq e ...) (if e e e) (let x = e in e)
+          (err s) (checkpoint k) (jump i k) (collect k)
           (send i v) (recv i)] 
   ;; The following are a 'pure' subset that can be evaluated as normal
-  ;; lambda-calculus expressions, without choose, jump, or collect.
+  ;; lambda-calculus expressions, without checkpoint, jump, or collect.
   [e/p v e/p/v]
-  [e/p/v (e/p e/p) (o1 e/p) (o2 e/p e/p) (seq e/p e) (if e/p e e) 
+  [e/p/v (e/p e/p) (o1 e/p) (o2 e/p e/p) (seq e/p ... e) (if e/p e e) 
        (let x = e/p in e) (err s)]
   [o1 add1 sub1 iszero]
   [o2 + - * / ^ eq?]
@@ -17,7 +17,7 @@
   [s string]
   [v b x (lambda x e) k unit]
   [E hole (E e) (v E) (o1 E) (o2 E e) (o2 v E) (if E e e)
-     (seq E e) (let x = E in e)]
+     (seq v ... E e ...) (let x = E in e)]
   [k (variable-prefix k)]
   [i (variable-prefix i)]
   [D (i ((k e) ...))]
@@ -25,7 +25,7 @@
   [x variable-not-otherwise-mentioned])
 
 ;; Application of primitive functions
-(define-metafunction choose-jump
+(define-metafunction checkpoint-jump
   [(delta (iszero 0)) true]
   [(delta (iszero b)) false (side-condition (number? (term b)))]
   [(delta (iszero v)) (err "iszero applied to a value that's not a number")]
@@ -55,7 +55,7 @@
   [(delta (eq? v_1 v_2)) ,(eq? (term v_1) (term v_2))])
 
 ;; Substitution
-(define-metafunction choose-jump
+(define-metafunction checkpoint-jump
   [(subst (lambda x_1 any_1) x_1 any_2) (lamdda x_1 any_1)]
   [(subst (lambda x_1 any_1) x_2 any_2)
    (lambda x_3 (subst (subst-var any_1 x_1 x_3) x_2 any_2))
@@ -71,13 +71,13 @@
   [(subst (any_2 ...) x_1 any_1) ((subst any_2 x_1 any_1) ...)]
   [(subst any_2 x_1 any_1) any_2])
 
-(define-metafunction choose-jump
+(define-metafunction checkpoint-jump
   [(subst-var (any_1 ...) x_1 x_2) ((subst-var any_1 x_1 x_2) ...)]
   [(subst-var x_1 x_1 x_2) x_2]
   [(subst-var any_1 x_1 x_2) any_1])
 
 ;; Single-step reduction for the pure lambda-calculus subset.
-(define-metafunction choose-jump
+(define-metafunction checkpoint-jump
   [(local-pure-red (in-hole E (err s))) (err s)
    (side-condition (not (equal? (term hole) (term E))))]
   [(local-pure-red (in-hole E ((lambda x e) v)))
@@ -86,7 +86,7 @@
    (in-hole E (delta (o1 b)))]
   [(local-pure-red (in-hole E (o2 b_1 b_2))) 
    (in-hole E (delta (o2 b_1 b_2)))]
-  [(local-pure-red (in-hole E (seq v e))) 
+  [(local-pure-red (in-hole E (seq v ... e))) 
    (in-hole E e)]
   [(local-pure-red (in-hole E (if true e_1 e_2))) 
    (in-hole E e_1)]
@@ -96,9 +96,9 @@
    (in-hole E (subst e x v))])
 
 ;; Base reduction; nothing more than parallel lambda-calculus.
-(define choose-red-base
+(define checkpoint-red-base
   (reduction-relation
-   choose-jump
+   checkpoint-jump
    (--> (par P_0 ... (D (name exp (in-hole E e/p/v))) P_1 ...)
         (par P_0 ... (D (local-pure-red exp)) P_1 ...))))
 
@@ -108,17 +108,17 @@
   (syntax-rules (-->)
     [(_ relation (--> e1 e2) ...)
      (extend-reduction-relation 
-       relation choose-jump
+       relation checkpoint-jump
        (--> (par P_0 (... ...) e1 P_1 (... ...))
             (par P_0 (... ...) e2 P_1 (... ...))) ...)]))
 
 ;; Extend the parallel langauge with local reductions. These reductions
 ;; might touch their own stores, but not other processes.
-(define choose-red-local
+(define checkpoint-red-local
   (local-extend-reduction
-    choose-red-base
-    ;; local choose
-    (--> ((i ((k_0 e_0) ...)) (in-hole E (choose k e_1 e_2)))
+    checkpoint-red-base
+    ;; local checkpoint
+    (--> ((i ((k_0 e_0) ...)) (in-hole E (checkpoint k)))
          ((i ((k_0 e_0) ... (k (in-hole E e_2)))) (in-hole E e_1)))
     ;; local collect
     (--> ((i ((k_0 e_0) ... (k_1 e_1) (k_2 e_2) ...)) 
@@ -134,7 +134,7 @@
   (syntax-rules (--> par)
     [(_ relation (--> (par e1 e2) (par e3 e4)) ...)
      (extend-reduction-relation 
-       relation choose-jump
+       relation checkpoint-jump
        (--> (par P_0 (... ...) e1 P_1 (... ...) e2 P_2 (... ...))
             (par P_0 (... ...) e3 P_1 (... ...) e4 P_2 (... ...))) ...
        (--> (par P_0 (... ...) e2 P_1 (... ...) e1 P_2 (... ...))
@@ -142,9 +142,9 @@
 
 ;; Extend the base with parallel reductions that interact with other
 ;; processes and stores.
-(define choose-red-parallel
+(define checkpoint-red-parallel
   (symmetric-extend-relation
-    choose-red-local
+    checkpoint-red-local
     ;; Parallel jumps
     (--> (par ((i_0 ((k_2 e_2) ... (k_1 e_1) (k_3 e_3) ...))
                (in-hole E_4 e))
@@ -177,41 +177,41 @@
 (define e6 (par-term (add1 (sub1 (add1 (sub1 10))))))
 (define e7 (par-term (if (iszero (sub1 1)) 5 6)))
 (define e8 (par-term (if (iszero (add1 1)) 5 6)))
-(define e9 (par-term (seq (seq 1 2) (add1 3))))
+(define e9 (par-term (seq 1 2 (add1 3))))
 (define e10 (par-term (let x = 6 in (let y = 2 in (+ x y)))))
 (define e11 (par-term (let x = 6 in (let y = 2 in (- x y)))))
 (define e12 (par-term (let x = 6 in (let y = 2 in (* x y)))))
 (define e13 (par-term (let x = 6 in (let y = 2 in (^ x y)))))
 (define e14 (par-term (let x = 6 in (let y = 2 in (/ x y)))))
 (define e15 (par-term (let x = 6 in (let y = 0 in (add1 (/ x y))))))
-(define e16 (par-term (add1 (choose k 1 2))))
-(define e17 (par-term (seq (choose k 1 2) (collect k))))
+(define e16 (par-term (add1 (seq (checkpoint k) 1))))
+(define e17 (par-term (seq (checkpoint k) 1 (collect k))))
 (define e18 
   (par-term 
-    (id i_1 (add1 (choose k 1 2)))
+    (id i_1 (add1 (checkpoint k)))
     (id i_2 (add1 (seq (jump i_1 k) 2)))))
 (define e19 
   (par-term 
     (id i_1 (add1 (seq (jump i_2 k) 2)))
-    (id i_2 (add1 (choose k 1 2)))))
+    (id i_2 (add1 (seq (checkpoint k) 1)))))
 (define e20 
   (par-term
-    (id i_1 (add1 (choose k 1 2)))
+    (id i_1 (add1 (seq (checkpoint k) 1)))
     (id i_2 (seq (collect k) (add1 2)))))
 (define e21
   (par-term
    (id i_1 
-       (add1 (choose k_1 
-                     (add1 (choose k_2 
+       (add1 (checkpoint k_1 
+                     (add1 (checkpoint k_2 
                                    (seq (jump i_2 k_3) 
                                         (seq (jump i_1 k_1) 10)) 
                                    20)) 
                      30)))
-   (id i_2 (sub1 (choose k_3 4 5)))))
+   (id i_2 (sub1 (checkpoint k_3 4 5)))))
 
 (define e22
   (par-term
-    (id i_1 (choose k (send i_2 0) (send i_2 120)))
+    (id i_1 (checkpoint k (send i_2 0) (send i_2 120)))
     (id i_2
         (let x = (recv i_1) in
           (if (iszero x)
@@ -222,7 +222,7 @@
 ;; Here's how I would like to write programs
 #;(define e23
   (par-term
-    (id i_1 (choose
+    (id i_1 (checkpoint
               (seq (send i_2 0)
                    (let x = (recv i_2) in 
                      (if (eq? x 5)
@@ -232,7 +232,7 @@
                    (recv i_2))))
     (id i_2
         (let x = (recv i_1)
-          (choose (send i_1 6) (send i_1 120))))))
+          (checkpoint (send i_1 6) (send i_1 120))))))
 
 ;; Here is how to view the evaluation of the example expressions
-(traces choose-red-parallel e23)
+(traces checkpoint-red-parallel e23)
