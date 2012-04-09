@@ -19,7 +19,7 @@
      (seq v ... E e ... e) (let x = E in e)]
   [k (variable-prefix k)]
   [i (variable-prefix i)]
-  [D (i k ((k e) ...))]
+  [D (i ((k e) ...))]
   [P (D e)]
   [x variable-not-otherwise-mentioned])
 
@@ -118,17 +118,16 @@
   (local-extend-reduction
     checkpoint-red-base
     ;; local checkpoint
-    (--> ((i k_1 ((k_0 e_0) ...)) (in-hole E (checkpoint k)))
-         ((i k ((k_0 e_0) ... (k (in-hole E unit)))) (in-hole E unit)))
+    (--> ((i ((k_0 e_0) ...)) (in-hole E (checkpoint k)))
+         ((i ((k_0 e_0) ... (k (in-hole E unit)))) (in-hole E unit)))
     ;; local collect
-    (--> ((i k ((k_0 e_0) ... (k_1 e_1) (k_2 e_2) ...)) 
+    (--> ((i ((k_0 e_0) ... (k_1 e_1) (k_2 e_2) ...)) 
           (in-hole E (collect k_1)))
-         ((i k ((k_0 e_0) ... (k_2 e_2) ...)) (in-hole E unit)))
+         ((i ((k_0 e_0) ... (k_2 e_2) ...)) (in-hole E unit)))
     ;; local backtrack
-    (--> ((i k (name K ((k_0 e) ... (k_1 e_1) (k_2 e_2) ...))) 
+    (--> ((i (name K ((k_0 e) ... (k_1 e_1) (k_2 e_2) ...))) 
           (in-hole E (backtrack i k_1)))
-         ((i k_1 K) e_1)
-         (side-condition (< k_1 k)))))
+         ((i K) e_1))))
 
 ;; Used to extend the parallel relation symmetrically--allowing the
 ;; rule to match no matter the process order
@@ -150,28 +149,26 @@
   (symmetric-extend-relation
     checkpoint-red-local
     ;; Parallel syncs
-    (--> (par ((i_0 k_00 ((k_2 e_2) ... (k_0 e_0) (k_3 e_3) ...))
+    (--> (par ((i_0 ((k_2 e_2) ... (k_0 e_0) (k_3 e_3) ...))
                (in-hole E_0 (sync i_1 k_0 e_01)))
-              ((i_1 k_10 ((k_4 e_4) ... (k_1 e_1) (k_5 e_5) ...))
+              ((i_1 ((k_4 e_4) ... (k_1 e_1) (k_5 e_5) ...))
                (in-hole E_1 (sync i_0 k_1 e_11))))
-         (par ((i_0 k_00 
-                    ((k_2 e_2) ... (k_0 (seq e_01 e_0)) (k_3 e_3) ...)) 
+         (par ((i_0 ((k_2 e_2) ... (k_0 (seq e_01 e_0)) (k_3 e_3) ...)) 
                (in-hole E_0 unit))
-              ((i_1 k_10 ((k_4 e_4) ... (k_1 (seq e_11 e_1)) (k_5 e_5) ...))
+              ((i_1 ((k_4 e_4) ... (k_1 (seq e_11 e_1)) (k_5 e_5) ...))
                (in-hole E_1 unit))))
     ;; Parallel collect
-    (--> (par ((i_0 k_00 ((k_0 e_0) ... (k_1 e_1) (k_2 e_2) ...)) 
+    (--> (par ((i_0 ((k_0 e_0) ... (k_1 e_1) (k_2 e_2) ...)) 
                (in-hole E_0 e))
-              ((i_1 k_11 ((k_3 e_3) ...)) (in-hole E_1 (collect k_1))))
-         (par ((i_0 k_00 ((k_0 e_0) ... (k_2 e_2) ...)) (in-hole E_0 e))
-              ((i_1 k_11 ((k_3 e_3) ...)) (in-hole E_1 unit))))
+              ((i_1 ((k_3 e_3) ...)) (in-hole E_1 (collect k_1))))
+         (par ((i_0 ((k_0 e_0) ... (k_2 e_2) ...)) (in-hole E_0 e))
+              ((i_1 ((k_3 e_3) ...)) (in-hole E_1 unit))))
     ;; Parallel backtrack
-    (--> (par ((name S0 (i_0 k_00 ((k_0 e_0) ...)))
+    (--> (par ((name S0 (i_0 ((k_0 e_0) ...)))
                (in-hole E_0 (backtrack i_1 k_1)))
-              ((i_1 k_11 (name K ((k_2 e_2) ... (k_1 e_1) (k_3 e_3) ...)))
+              ((name S1 (i_1 ((k_2 e_2) ... (k_1 e_1) (k_3 e_3) ...)))
                e))
-         (par (S0 (in-hole E_0 unit)) ((i_1 k_1 K) e_1))
-         (side-condition (< k_1 k_11)))
+         (par (S0 (in-hole E_0 unit)) (S1 e_1)))
     ;; Send/recv
     #;(--> (par ((name S0 (i_0 ((k_0 e_0) ...))) (in-hole E_0 (send i_1 v)))
               ((name S1 (i_1 ((k_1 e_1) ...))) (in-hole E_1 (recv i_0))))
@@ -179,8 +176,8 @@
 
 (define-syntax par-term
   (syntax-rules (id)
-    [(_ (id i exp) ...) (term (par ((i k_0 ()) exp) ...))]
-    [(_ exp ...) (term (par ((i k_0 ()) exp) ...))] ))
+    [(_ (id i exp) ...) (term (par ((i ()) exp) ...))]
+    [(_ exp ...) (term (par ((i ()) exp) ...))] ))
 
 ;; A few small examples
 (define e0 (par-term 3))
