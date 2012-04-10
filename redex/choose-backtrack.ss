@@ -10,7 +10,7 @@
   ;; lambda-calculus expressions, without choose, backtrack, or collect.
   [e/p v e/p/v]
   [e/p/v (e/p e/p) (o1 e/p) (o2 e/p e/p) (seq e/p ... e) (if e/p e e) 
-       (let x = e/p in e) (err s)]
+       (let x = e/p in e)]
   [o1 add1 sub1 iszero]
   [o2 + - * / ^ eq? <]
   [b number true false]
