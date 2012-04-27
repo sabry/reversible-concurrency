@@ -12,10 +12,10 @@
   [e/p/v (e/p e/p) (o1 e/p) (o2 e/p e/p) (seq e/p ... e) (if e/p e e) 
        (let x = e/p in e)]
   [o1 add1 sub1 iszero]
-  [o2 + - * / ^ eq? <]
-  [b number true false]
+  [o2 + - * / ^ eq? < cons car cdr]
+  [b number true false unit]
   [s string]
-  [v b x (lambda x e) k unit]
+  [v b x (lambda x e)]
   [E hole (E e) (v E) (o1 E) (o2 E e) (o2 v E) (if E e e)
      (seq v ... E e ... e) (let x = E in e) (send i E)]
   [k (variable-prefix k)]
@@ -25,6 +25,7 @@
   [x variable-not-otherwise-mentioned])
 
 ;; Application of primitive functions
+;; Look at all those runtime errors that should be type errors.
 (define-metafunction choose-backtrack
   [(delta (iszero 0)) true]
   [(delta (iszero b)) false (side-condition (number? (term b)))]
@@ -59,7 +60,12 @@
   [(delta (< b_1 b_2)) ,(if (< (term b_1) (term b_2)) (term true) 
                           (term false))
           (side-condition (and (number? (term b_1)) (number? (term b_2))))]
-  [(delta (< v_1 v_2)) (err "< applied to non-numbers")])
+  [(delta (< v_1 v_2)) (err "< applied to non-numbers")]
+  [(delta (cons v_1 v_2)) ,(cons (term v_1) (term v_2))]
+  [(delta (car v)) ,(car (term v)) (side-condition (pair? (term v)))]
+  [(delta (car v)) (err "car applies to non-pair")]
+  [(delta (cdr v)) ,(cdr (term v)) (side-condition (pair? (term v)))]
+  [(delta (cdr v)) (err "cdr applies to non-pair")])
 
 ;; Substitution
 (define-metafunction choose-backtrack
@@ -126,15 +132,11 @@
   (local-extend-reduction
     choose-red-base
     ;; local choose -- unique
-    (--> ((i ((k e) ... (k_0 e_0))) (in-hole E (choose k_0 e ...)))
-         ((i ((k e) ...)) (in-hole E (choose k_0 e ...))))
-    ;; local choose -- final
-    (--> ((i ((k e) ...)) (in-hole E (choose k_0 e_0)))
-         ((i ((k e) ... (k_0 (in-hole E (err "No more choices"))))) 
-          (in-hole E e_0)))
+    (--> ((i ((k e) ... (k_0 e_0))) (in-hole E (choose k_0 e_1 ...)))
+         ((i ((k e) ...)) (in-hole E (choose k_0 e_1 ...))))
     ;; local choose -- multi
-    (--> ((i ((k e) ...)) (in-hole E (choose k_0 e_0 e_1 ... e_2)))
-         ((i ((k e) ... (k_0 (in-hole E (choose k_0 e_1 ... e_2))))) 
+    (--> ((i ((k e) ...)) (in-hole E (choose k_0 e_0 e_1 ...)))
+         ((i ((k e) ... (k_0 (in-hole E (choose k_0 e_1 ... e_0))))) 
           (in-hole E e_0)))
     ;; local collect
     (--> ((i ((k_0 e_0) ... (k_1 e_1) (k_2 e_2) ...)) 
@@ -248,5 +250,37 @@
         (let x = (choose k_4 7 1 (err "Failure!")) in 
           (choose k_5 (send i_1 x) (send i_1 x))) )))
 
+(define e25
+  (par-term
+    (id i_0
+        ((let x = (recv i_1) in
+          (let y = (recv i_2) in 
+            (let z = (recv i_3) in
+              (if (< x y)
+                (if (< y z)
+                  (err "Success")
+                  (err "Fail"))
+                (err "Fail")))))))
+    (id i_1
+        (seq (choose k_0 unit (backtrack i_2 k_1))
+             (let x = (recv i_2) in
+               (let y = (choose k_1 5 2 (backtrack i_1 k_0)) in 
+                 (if (< y x)
+                   (send i_0 y)
+                   (backtrack i_1 k_1))))))
+    (id i_2
+        (seq (choose k_0 unit (backtrack i_3 k_1))
+             (let x = (recv i_3) in
+               (let y = (choose k_1 6 1 (backtrack i_2 k_0)) in
+                 (if (< y x)
+                   (seq (send i_1 y)
+                        (send i_0 y))
+                   (backtrack i_2 k_1))))))
+    (id i_3
+       (let y = (choose k_1 2 7 (err "Fail")) in
+         (seq (send i_2 y)
+              (send i_0 y))))
+    ))
+
 ;; Here is how to view the evaluation of the example expressions
-(traces choose-red-parallel e24)
+(traces choose-red-parallel e25)
