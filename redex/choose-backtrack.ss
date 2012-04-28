@@ -262,22 +262,22 @@
                   (err "Fail"))
                 (err "Fail"))))))
     (id i_1
-        (seq (choose k_0 unit (backtrack i_2 k_1))
+        (seq (choose k_0 unit (backtrack i_2 k_1) (err "Fail"))
              (let x = (recv i_2) in
-               (let y = (choose k_1 5 2 (backtrack i_1 k_0)) in 
+               (let y = (choose k_1 5 2 (backtrack i_1 k_0) (err "Fail")) in 
                  (if (< y x)
                    (send i_0 y)
                    (backtrack i_1 k_1))))))
     (id i_2
-        (seq (choose k_0 unit (backtrack i_3 k_1))
+        (seq (choose k_0 unit (backtrack i_3 k_1) (err "Fail"))
              (let x = (recv i_3) in
-               (let y = (choose k_1 6 1 (backtrack i_2 k_0)) in
+               (let y = (choose k_1 6 1 (backtrack i_2 k_0) (err "Fail")) in
                  (if (< y x)
                    (seq (send i_1 y)
                         (send i_0 y))
                    (backtrack i_2 k_1))))))
     (id i_3
-       (let y = (choose k_1 7 2 (err "Fail")) in
+       (let y = (choose k_1 2 7 (err "Fail")) in
          (seq (send i_2 y)
               (send i_0 y))))
     ))
