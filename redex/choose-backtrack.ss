@@ -4,7 +4,7 @@
 ;; Abstract syntax
 (define-language choose-backtrack
   [e v (e e) (o1 e) (o2 e e) (seq e ...) (if e e e) (let x = e in e)
-     (err s) (choose k e ...) (collect k) (backtrack i k)
+     (err s) (choose k e e ...) (collect k) (backtrack i k)
      (send i e) (recv i)] 
   ;; The following are a 'pure' subset that can be evaluated as normal
   ;; lambda-calculus expressions, without choose, backtrack, or collect.
@@ -62,9 +62,9 @@
           (side-condition (and (number? (term b_1)) (number? (term b_2))))]
   [(delta (< v_1 v_2)) (err "< applied to non-numbers")]
   [(delta (cons v_1 v_2)) ,(cons (term v_1) (term v_2))]
-  [(delta (car v)) ,(car (term v)) (side-condition (pair? (term v)))]
+  [(delta (car b)) ,(car (term v)) (side-condition (pair? (term v)))]
   [(delta (car v)) (err "car applies to non-pair")]
-  [(delta (cdr v)) ,(cdr (term v)) (side-condition (pair? (term v)))]
+  [(delta (cdr b)) ,(cdr (term v)) (side-condition (pair? (term v)))]
   [(delta (cdr v)) (err "cdr applies to non-pair")])
 
 ;; Substitution
@@ -253,14 +253,14 @@
 (define e25
   (par-term
     (id i_0
-        ((let x = (recv i_1) in
+        (let x = (recv i_1) in
           (let y = (recv i_2) in 
             (let z = (recv i_3) in
               (if (< x y)
                 (if (< y z)
                   (err "Success")
                   (err "Fail"))
-                (err "Fail")))))))
+                (err "Fail"))))))
     (id i_1
         (seq (choose k_0 unit (backtrack i_2 k_1))
              (let x = (recv i_2) in
@@ -277,7 +277,7 @@
                         (send i_0 y))
                    (backtrack i_2 k_1))))))
     (id i_3
-       (let y = (choose k_1 2 7 (err "Fail")) in
+       (let y = (choose k_1 7 2 (err "Fail")) in
          (seq (send i_2 y)
               (send i_0 y))))
     ))
