@@ -5,12 +5,12 @@
 (define-language choose-backtrack
   [e v (e e) (o1 e) (o2 e e) (seq e ...) (if e e e) (let x = e in e)
      (err s) (choose k e e ...) (collect k) (backtrack i k)
-     (send i e) (recv i)] 
+     (send i e) (recv i) (sync i k e)] 
   ;; The following are a 'pure' subset that can be evaluated as normal
   ;; lambda-calculus expressions, without choose, backtrack, or collect.
-  [e/p v e/p/v]
+  [e/p v e/p/v (err s)]
   [e/p/v (e/p e/p) (o1 e/p) (o2 e/p e/p) (seq e/p ... e) (if e/p e e) 
-       (let x = e/p in e)]
+       (let x = e/p in e) ]
   [o1 add1 sub1 iszero]
   [o2 + - * / ^ eq? < cons car cdr]
   [b number true false unit]
@@ -132,12 +132,15 @@
   (local-extend-reduction
     choose-red-base
     ;; local choose -- unique
-    (--> ((i ((k e) ... (k_0 e_0))) (in-hole E (choose k_0 e_1 ...)))
-         ((i ((k e) ...)) (in-hole E (choose k_0 e_1 ...))))
+    (--> ((i ((k e) ... (k_0 e_2) (k_1 e_3) ...)) 
+          (name exp (in-hole E (choose k_0 e_0 e_1 ...))))
+         ((i ((k e) ... (k_1 e_3) ...)) exp))
     ;; local choose -- multi
     (--> ((i ((k e) ...)) (in-hole E (choose k_0 e_0 e_1 ...)))
          ((i ((k e) ... (k_0 (in-hole E (choose k_0 e_1 ... e_0))))) 
-          (in-hole E e_0)))
+          (in-hole E e_0))
+         (side-condition
+           (not (member (term k_0) (term (k ...))))))
     ;; local collect
     (--> ((i ((k_0 e_0) ... (k_1 e_1) (k_2 e_2) ...)) 
           (in-hole E (collect k_1)))
@@ -178,6 +181,15 @@
               ((name S1 (i_1 ((k_2 e_2) ... (k_1 e_1) (k_3 e_3) ...)))
                e))
          (par (S0 (in-hole E_0 unit)) (S1 e_1)))
+    ;; Sync
+    (--> (par ((i_0 ((k_0 e_0) ... (k_2 e_4) (k_4 e_6) ...)) 
+               (in-hole E_0 (sync i_1 k_2 e_2)))
+              ((i_1 ((k_1 e_1) ... (k_3 e_5) (k_5 e_7) ...)) 
+               (in-hole E_1 (sync i_0 k_3 e_3))))
+         (par ((i_0 ((k_0 e_0) ... (k_2 (seq e_2 e_4)) (k_4 e_6) ...)) 
+               (in-hole E_0 unit))
+              ((i_1 ((k_1 e_1) ... (k_3 (seq e_3 e_5)) (k_5 e_7) ...)) 
+               (in-hole E_1 unit)) ))
     ;; Send/recv
     (--> (par ((name S0 (i_0 ((k_0 e_0) ...))) (in-hole E_0 (send i_1 v)))
               ((name S1 (i_1 ((k_1 e_1) ...))) (in-hole E_1 (recv i_0))))
@@ -205,19 +217,19 @@
 (define e13 (par-term (let x = 6 in (let y = 2 in (^ x y)))))
 (define e14 (par-term (let x = 6 in (let y = 2 in (/ x y)))))
 (define e15 (par-term (let x = 6 in (let y = 0 in (add1 (/ x y))))))
-(define e16 (par-term (add1 (seq (choose k) 1))))
-(define e17 (par-term (seq (choose k) 1 (collect k))))
+(define e16 (par-term (add1 (choose k 1))))
+(define e17 (par-term (seq (choose k 1) (collect k))))
 (define e18 
   (par-term 
-    (id i_1 (add1 (choose k)))
+    (id i_1 (add1 (choose k 1 (err "Fail"))))
     (id i_2 (add1 (seq (backtrack i_1 k) 2)))))
 (define e19 
   (par-term 
     (id i_1 (add1 (seq (backtrack i_2 k) 2)))
-    (id i_2 (add1 (seq (choose k) 1)))))
+    (id i_2 (add1 (seq (choose k 1 (err "Fail")))))))
 (define e20 
   (par-term
-    (id i_1 (add1 (seq (choose k) 1)))
+    (id i_1 (add1 (seq (choose k 1))))
     (id i_2 (seq (collect k) (add1 2)))))
 (define e21
   (par-term (seq (seq 1 1) (seq 1 2) (seq 1 3))))
@@ -227,7 +239,7 @@
   (par-term
     (id i_1 (let x = (choose k 1 0) in
       (if (iszero x)
-        (err "Sucess!")
+        (err "Success!")
         (backtrack i_1 k))))))
 (define e24
   (par-term 
@@ -239,16 +251,27 @@
                  (let z = (recv i_3) in
                    (if (< x y)
                      (if (< y z)
-                       (err "Success!")
+                       (seq (collect k)
+                            (collect k_1)
+                            (send i_2 1)
+                            (send i_3 1)
+                            (err "Success!"))
                        (backtrack i_1 k_1))
                      (backtrack i_1 k_1)))))))
     (id i_2
         (seq (choose k_2 unit (backtrack i_3 k_4) (err "Failure!"))
              (let x = (choose k_1 2 5 (backtrack i_2 k_2)) in 
-               (choose k_3 (send i_1 x) (send i_1 x)))))
+               (seq (choose k_3 (send i_1 x) (send i_1 x))
+               (recv i_1)
+               (collect k_3)
+               (collect k_2)
+               (collect k_1)))))
     (id i_3
         (let x = (choose k_4 7 1 (err "Failure!")) in 
-          (choose k_5 (send i_1 x) (send i_1 x))) )))
+          (seq (choose k_5 (send i_1 x) (send i_1 x))
+          (recv i_1)
+          (collect k_4)
+          (collect k_5))))))
 
 (define e25
   (par-term
@@ -264,23 +287,97 @@
     (id i_1
         (seq (choose k_0 unit (backtrack i_2 k_1) (err "Fail"))
              (let x = (recv i_2) in
-               (let y = (choose k_1 5 2 (backtrack i_1 k_0) (err "Fail")) in 
+               (let y = (choose k_1 5 3 (backtrack i_1 k_0) (err "Fail")) in 
                  (if (< y x)
                    (send i_0 y)
                    (backtrack i_1 k_1))))))
     (id i_2
         (seq (choose k_0 unit (backtrack i_3 k_1) (err "Fail"))
              (let x = (recv i_3) in
-               (let y = (choose k_1 6 1 (backtrack i_2 k_0) (err "Fail")) in
+               (let y = (choose k_1 6 2 (backtrack i_2 k_0) (err "Fail")) in
                  (if (< y x)
                    (seq (send i_1 y)
                         (send i_0 y))
                    (backtrack i_2 k_1))))))
     (id i_3
-       (let y = (choose k_1 2 7 (err "Fail")) in
+       (let y = (choose k_1 7 2 (err "Fail")) in
          (seq (send i_2 y)
               (send i_0 y))))
     ))
 
+(define e26 
+  (par-term
+    (id i_0 (let x = (add1 (choose k 2 3)) in
+              (seq (sync i_1 k (backtrack i_1 k))
+                   (send i_1 x)
+                   (if (iszero (recv i_1))
+                     (seq (send i_1 1)
+                          (collect k)
+                          (err "Success"))
+                     (backtrack i_0 k)))))
+    (id i_1 (let x = (choose k 3 0) in
+              (seq (sync i_0 k unit)
+                   (recv i_0)
+                   (send i_0 x)
+                   (recv i_0)
+                   (collect k)
+                   (err "Success"))))))
+
+;; Automatically check all the test cases still work. All test cases
+;; should normalize, or reduce may not terminate.
+(require srfi/78)
+
+(define (reduce e)
+  (apply-reduction-relation* choose-red-parallel e))
+
+(check (reduce e0) => (list e0))
+(check (reduce e1) => (list e1))
+(check (reduce e2) => (list e2))
+(check (reduce e3) => (list e3))
+(check (reduce e4) => (list e4))
+(check (reduce e5) => (list (par-term 3)))
+(check (reduce e6) => (list (par-term 10)))
+(check (reduce e7) => (list (par-term 5)))
+(check (reduce e8) => (list (par-term 6)))
+(check (reduce e10) => (list (par-term 8)))
+(check (reduce e11) => (list (par-term 4)))
+(check (reduce e12) => (list (par-term 12)))
+(check (reduce e13) => (list (par-term 36)))
+(check (reduce e14) => (list (par-term 3)))
+(check (reduce e15) => (list (par-term (err "division by zero"))))
+(check (reduce e16) => 
+       (list (term (par ((i ((k (add1 (choose k 1))))) 2)))))
+(check (reduce e17) => (list (par-term unit)))
+(check (reduce e18) => (list (term 
+                               (par 
+                                 ((i_1 
+                                   ((k (add1 (choose k 1 (err "Fail"))))))
+                                  (err "Fail") ) 
+                                 ((i_2 ()) 3)))))
+(check (reduce e19) => (list (term 
+                               (par 
+                                 ((i_1 ()) 3)
+                                 ((i_2 
+                                   ((k (add1 (choose k 1 (err "Fail"))))))
+                                  (err "Fail"))))))
+(check (reduce e20) => (list (par-term (id i_1 2) (id i_2 3))))
+(check (reduce e21) => (list (par-term 3)))
+(check (reduce e22) => (list (par-term 3)))
+(check (reduce e23) => (list (term 
+                               (par 
+                                 ((i_1 ((k (let x = (choose k 1 0) in
+                                             (if (iszero x)
+                                               (err "Success!")
+                                               (backtrack i_1 k)))))) 
+                                  (err "Success!"))))))
+
+;; This takes a while, but does in fact succeed!
+(check (reduce e26) => (list (par-term (id i_0 (err "Success"))
+                                       (id i_1 (err "Success")))))
 ;; Here is how to view the evaluation of the example expressions
-(traces choose-red-parallel e25)
+#;(traces choose-red-parallel e24)
+
+;; Here's how to try to normalize an expression without a massive state
+;; graph
+(current-cache-all #t)
+(apply-reduction-relation* choose-red-parallel e24)
