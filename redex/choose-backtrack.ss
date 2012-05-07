@@ -1,13 +1,20 @@
 #lang racket
 (require redex)
 
+;; This version of the language contains backtrack, synchronous
+;; communication, and a 'sync' primitive. It also uses a slightly
+;; generalized choose, which cycles through it's choices unless one of
+;; the choices is an error. The `normal' choose can be recovered by
+;; simply using (err "Fail") as the last choice.
+;;
 ;; Abstract syntax
 (define-language choose-backtrack
   [e v (e e) (o1 e) (o2 e e) (seq e ...) (if e e e) (let x = e in e)
      (err s) (choose k e e ...) (collect k) (backtrack i k)
      (send i e) (recv i) (sync i k e)] 
   ;; The following are a 'pure' subset that can be evaluated as normal
-  ;; lambda-calculus expressions, without choose, backtrack, or collect.
+  ;; lambda-calculus expressions, without choose, backtrack, collect,
+  ;; sync, etc.
   [e/p v e/p/v (err s)]
   [e/p/v (e/p e/p) (o1 e/p) (o2 e/p e/p) (seq e/p ... e) (if e/p e e) 
        (let x = e/p in e) ]
@@ -18,14 +25,30 @@
   [v b x (lambda x e)]
   [E hole (E e) (v E) (o1 E) (o2 E e) (o2 v E) (if E e e)
      (seq v ... E e ... e) (let x = E in e) (send i E)]
+  ;; k variables represent choice points. In a real implementation, they
+  ;; might be timestamps. Each variable should be unique (at least in a
+  ;; single processes scope), and map to one continuation in the process
+  ;; local store.
   [k (variable-prefix k)]
+  ;; i variables are process identifiers.
   [i (variable-prefix i)]
+  ;; D is the process local store. It contains a process identifier, and
+  ;; a mapping of k vars to continutation.
   [D (i ((k e) ...))]
+  ;; P is a short-hand for a closeed process. A process is a local
+  ;; mapping and an expression. I'm not sure if it's used any more
   [P (D e)]
   [x variable-not-otherwise-mentioned])
 
 ;; Application of primitive functions
-;; Look at all those runtime errors that should be type errors.
+;; Look at all those runtime errors that should be type errors. 
+;;
+;; Delta reduces the normal, uninteresting, scheme-like language
+;; primitive functions. 
+;;
+;; It seems to me there's room for abstraction here, since each new
+;; primitive involves a predicate check + error, then a normal
+;; evaluation which lifts a scheme expression into our language.
 (define-metafunction choose-backtrack
   [(delta (iszero 0)) true]
   [(delta (iszero b)) false (side-condition (number? (term b)))]
@@ -90,6 +113,9 @@
   [(subst-var any_1 x_1 x_2) any_1])
 
 ;; Single-step reduction for the pure lambda-calculus subset.
+;; 
+;; This simply reduces all the primitives of the uninteresting
+;; scheme-like langauge.
 (define-metafunction choose-backtrack
   [(local-pure-red (in-hole E (err s))) (err s)
    (side-condition (not (equal? (term hole) (term E))))]
@@ -109,14 +135,19 @@
    (in-hole E (subst e x v))])
 
 ;; Base reduction; nothing more than parallel lambda-calculus.
+;;
+;; This create a base reduction that simply applies the local-pure-red to
+;; each 'pure' expressions (expressions without
+;; choose/communication/sync). Each new reduction should extend this
+;; one.
 (define choose-red-base
   (reduction-relation
    choose-backtrack
    (--> (par P_0 ... (D (name exp (in-hole E e/p/v))) P_1 ...)
         (par P_0 ... (D (local-pure-red exp)) P_1 ...))))
 
-;; Extend a relation with rules that touch only their own stores, but
-;; don't interact with other processes.
+;; This macro allows extending a relation with rules that touch only
+;; their own stores, but don't interact with other processes.
 (define-syntax local-extend-reduction
   (syntax-rules (-->)
     [(_ relation (--> e1 e2 etc ...) ...)
@@ -126,8 +157,10 @@
             (par P_0 (... ...) e2 P_1 (... ...))
             etc ...) ...)]))
 
-;; Extend the parallel langauge with local reductions. These reductions
-;; might touch their own stores, but not other processes.
+;; This reduction extends the base reduction with process local
+;; reductions for the 'non-pure' forms, like choose, collect, and
+;; backtrack. These reductions might touch their own stores, but will
+;; not interact with other processes.
 (define choose-red-local
   (local-extend-reduction
     choose-red-base
@@ -150,8 +183,10 @@
           (in-hole E (backtrack i k_1)))
          ((i K) e_1))))
 
-;; Used to extend the parallel relation symmetrically--allowing the
-;; rule to match no matter the process order
+;; This macro is used to extend the parallel relation
+;; symmetrically--allowing the rule to match no matter the process
+;; order. It's useful when, for example, you want a process to be able
+;; to send and receive no matter their syntactic ordering.
 (define-syntax symmetric-extend-relation
   (syntax-rules (--> par)
     [(_ relation (--> (par e1 e2) (par e3 e4) etc ...) ...)
@@ -164,8 +199,8 @@
             (par P_0 (... ...) e4 P_1 (... ...) e3 P_2 (... ...))
             etc ...) ...)]))
 
-;; Extend the base with parallel reductions that interact with other
-;; processes and stores.
+;; This reduction extends the local 'non-pure' reduction with parallel
+;; reductions that interact with other processes and stores.
 (define choose-red-parallel
   (symmetric-extend-relation
     choose-red-local
@@ -195,6 +230,15 @@
               ((name S1 (i_1 ((k_1 e_1) ...))) (in-hole E_1 (recv i_0))))
          (par (S0 (in-hole E_0 unit)) (S1 (in-hole E_1 v))))))
 
+;; This macro allows writing term expressions for the parallel languages
+;; a little more easily. If you give untagged expression, then it gives a
+;; default process IDs and empty store. Don't use this form if you need
+;; communication.
+;;
+;; You can also give another form to specify the process id's manually.
+;; Use this form if you want communication. 
+;;
+;; See below for examples.
 (define-syntax par-term
   (syntax-rules (id)
     [(_ (id i exp) ...) (term (par ((i ()) exp) ...))]
@@ -327,8 +371,10 @@
 ;; should normalize, or reduce may not terminate.
 (require srfi/78)
 
+;; This tries to normalize an expression. It may not terminate if there
+;; are cycles.
 (define (reduce e)
-  (apply-reduction-relation* choose-red-parallel e))
+  (apply-reduction-relation* choose-red-parallel e #:cache-all? #t))
 
 (check (reduce e0) => (list e0))
 (check (reduce e1) => (list e1))
@@ -377,7 +423,6 @@
 ;; Here is how to view the evaluation of the example expressions
 #;(traces choose-red-parallel e24)
 
-;; Here's how to try to normalize an expression without a massive state
-;; graph
-(current-cache-all #t)
-(apply-reduction-relation* choose-red-parallel e24)
+;; Here is how to try to normalize an expression without manually
+;; stepping through the trace graph.
+(reduce e26)
