@@ -1,19 +1,24 @@
 #lang racket
 (require redex)
 
-;; This version of the language contains backtrack, synchronous
+;; This version of the language contains `failing backtrack', synchronous
 ;; communication, and a 'sync' primitive. It also uses a slightly
 ;; generalized choose, which cycles through it's choices unless one of
 ;; the choices is an error. The `normal' choose can be recovered by
 ;; simply using (err "Fail") as the last choice.
 ;;
+;; Here, backtracking can fail if a process has already `commited',
+;; decided it will not backtrack past a certain point. If a process asks
+;; it to do so, it fails, and takes an alterative path specified in the
+;; backtrack expression.
+;;
 ;; Abstract syntax
 (define-language choose-backtrack
   [e v (e e) (o1 e) (o2 e e) (seq e ...) (if e e e) (let x = e in e)
-     (err s) (choose k e e ...) (collect k) (backtrack i k)
+     (err s) (choose k e e ...) (commit k) (backtrack i k e)
      (send i e) (recv i) (sync i k e)] 
   ;; The following are a 'pure' subset that can be evaluated as normal
-  ;; lambda-calculus expressions, without choose, backtrack, collect,
+  ;; lambda-calculus expressions, without choose, backtrack, commit,
   ;; sync, etc.
   [e/p v e/p/v (err s)]
   [e/p/v (e/p e/p) (o1 e/p) (o2 e/p e/p) (seq e/p ... e) (if e/p e e) 
@@ -158,27 +163,43 @@
             etc ...) ...)]))
 
 ;; This reduction extends the base reduction with process local
-;; reductions for the 'non-pure' forms, like choose, collect, and
+;; reductions for the 'non-pure' forms, like choose, commit, and
 ;; backtrack. These reductions might touch their own stores, but will
 ;; not interact with other processes.
 (define choose-red-local
   (local-extend-reduction
     choose-red-base
     ;; local choose -- unique
+    ;;
+    ;; Choose can be reduced locally; it simply added a new k-var/
+    ;; continuation pair to the store. If the k-var already exists in
+    ;; the store, it must be removed first. 
     (--> ((i ((k e) ... (k_0 e_2) (k_1 e_3) ...)) 
           (name exp (in-hole E (choose k_0 e_0 e_1 ...))))
          ((i ((k e) ... (k_1 e_3) ...)) exp))
-    ;; local choose -- multi
+    ;; local choose -- other
+    ;;
+    ;; Choose puts the first expression into the current context, and
+    ;; puts a slightly modified version of the current context and it's
+    ;; filled-hole into the store. The hole is filled with a choose
+    ;; expression whose choices have been rearranged to allow choose to
+    ;; cycle through choices.
     (--> ((i ((k e) ...)) (in-hole E (choose k_0 e_0 e_1 ...)))
          ((i ((k e) ... (k_0 (in-hole E (choose k_0 e_1 ... e_0))))) 
           (in-hole E e_0))
          (side-condition
            (not (member (term k_0) (term (k ...))))))
-    ;; local collect
+    ;; local commit
+    ;;
+    ;; Commit simply removes all continuations from the store prior to a
+    ;; named point.
     (--> ((i ((k_0 e_0) ... (k_1 e_1) (k_2 e_2) ...)) 
-          (in-hole E (collect k_1)))
-         ((i ((k_0 e_0) ... (k_2 e_2) ...)) (in-hole E unit)))
+          (in-hole E (commit k_1)))
+         ((i ((k_2 e_2) ...)) (in-hole E unit)))
     ;; local backtrack
+    ;;
+    ;; Local backtracking simply aborts the current continuation, and
+    ;; uses the named one.
     (--> ((i (name K ((k_0 e) ... (k_1 e_1) (k_2 e_2) ...))) 
           (in-hole E (backtrack i k_1)))
          ((i K) e_1))))
@@ -204,19 +225,28 @@
 (define choose-red-parallel
   (symmetric-extend-relation
     choose-red-local
-    ;; Parallel collect
-    (--> (par ((i_0 ((k_0 e_0) ... (k_1 e_1) (k_2 e_2) ...)) 
-               (in-hole E_0 e))
-              ((i_1 ((k_3 e_3) ...)) (in-hole E_1 (collect k_1))))
-         (par ((i_0 ((k_0 e_0) ... (k_2 e_2) ...)) (in-hole E_0 e))
-              ((i_1 ((k_3 e_3) ...)) (in-hole E_1 unit))))
     ;; Parallel backtrack
+    ;;
+    ;; A version of backtrack which works across threads. This allows
+    ;; one thread to force another to backtrack.
     (--> (par ((name S0 (i_0 ((k_0 e_0) ...)))
-               (in-hole E_0 (backtrack i_1 k_1)))
+               (in-hole E_0 (backtrack i_1 k_1 e)))
               ((name S1 (i_1 ((k_2 e_2) ... (k_1 e_1) (k_3 e_3) ...)))
-               e))
+               e_5))
          (par (S0 (in-hole E_0 unit)) (S1 e_1)))
+    ;; If there is no such k-var, then the backtrack fails, and the
+    ;; alternate path must be taken.
+    (--> (par ((name S0 (i_0 ((k_0 e_0) ...)))
+               (in-hole E_0 (backtrack i_1 k_1 e)))
+              (name P1 ((i_1 ((k_3 e_3) ...)) e_5)))
+         (par (S0 (in-hole E_0 e)) P1)
+         (side-condition
+           (not (member (term k_1) (term (k_3 ...))))))
     ;; Sync
+    ;;
+    ;; Sync acts as a boundery that, when crossed via backtracking,
+    ;; executes an expression. Sync is synchronous, and must be paired
+    ;; between two processes.
     (--> (par ((i_0 ((k_0 e_0) ... (k_2 e_4) (k_4 e_6) ...)) 
                (in-hole E_0 (sync i_1 k_2 e_2)))
               ((i_1 ((k_1 e_1) ... (k_3 e_5) (k_5 e_7) ...)) 
@@ -226,6 +256,8 @@
               ((i_1 ((k_1 e_1) ... (k_3 (seq e_3 e_5)) (k_5 e_7) ...)) 
                (in-hole E_1 unit)) ))
     ;; Send/recv
+    ;;
+    ;; Primitive, synchronous communication. You can send values.
     (--> (par ((name S0 (i_0 ((k_0 e_0) ...))) (in-hole E_0 (send i_1 v)))
               ((name S1 (i_1 ((k_1 e_1) ...))) (in-hole E_1 (recv i_0))))
          (par (S0 (in-hole E_0 unit)) (S1 (in-hole E_1 v))))))
@@ -262,7 +294,7 @@
 (define e14 (par-term (let x = 6 in (let y = 2 in (/ x y)))))
 (define e15 (par-term (let x = 6 in (let y = 0 in (add1 (/ x y))))))
 (define e16 (par-term (add1 (choose k 1))))
-(define e17 (par-term (seq (choose k 1) (collect k))))
+(define e17 (par-term (seq (choose k 1) (commit k))))
 (define e18 
   (par-term 
     (id i_1 (add1 (choose k 1 (err "Fail"))))
@@ -274,7 +306,7 @@
 (define e20 
   (par-term
     (id i_1 (add1 (seq (choose k 1))))
-    (id i_2 (seq (collect k) (add1 2)))))
+    (id i_2 (seq (commit k) (add1 2)))))
 (define e21
   (par-term (seq (seq 1 1) (seq 1 2) (seq 1 3))))
 (define e22
@@ -295,8 +327,8 @@
                  (let z = (recv i_3) in
                    (if (< x y)
                      (if (< y z)
-                       (seq (collect k)
-                            (collect k_1)
+                       (seq (commit k)
+                            (commit k_1)
                             (send i_2 1)
                             (send i_3 1)
                             (err "Success!"))
@@ -307,15 +339,15 @@
              (let x = (choose k_1 2 5 (backtrack i_2 k_2)) in 
                (seq (choose k_3 (send i_1 x) (send i_1 x))
                (recv i_1)
-               (collect k_3)
-               (collect k_2)
-               (collect k_1)))))
+               (commit k_3)
+               (commit k_2)
+               (commit k_1)))))
     (id i_3
         (let x = (choose k_4 7 1 (err "Failure!")) in 
           (seq (choose k_5 (send i_1 x) (send i_1 x))
           (recv i_1)
-          (collect k_4)
-          (collect k_5))))))
+          (commit k_4)
+          (commit k_5))))))
 
 (define e25
   (par-term
@@ -356,7 +388,7 @@
                    (send i_1 x)
                    (if (iszero (recv i_1))
                      (seq (send i_1 1)
-                          (collect k)
+                          (commit k)
                           (err "Success"))
                      (backtrack i_0 k)))))
     (id i_1 (let x = (choose k 3 0) in
@@ -364,7 +396,7 @@
                    (recv i_0)
                    (send i_0 x)
                    (recv i_0)
-                   (collect k)
+                   (commit k)
                    (err "Success"))))))
 
 ;; Automatically check all the test cases still work. All test cases
