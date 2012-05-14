@@ -299,7 +299,6 @@
 (define e15 (par-term (let x = 6 in (let y = 0 in (add1 (/ x y))))))
 (define e16 (par-term (add1 (choose k 1))))
 (define e17 (par-term (seq (choose k 1) (commit k))))
-
 (define e18 
   (par-term 
     (id i_1 (add1 (choose k 1 (err "Fail"))))
@@ -322,6 +321,14 @@
       (if (iszero x)
         (err "Success!")
         (backtrack i_1 k (err "Error")))))))
+
+;; This example uses choice and backtracking to find, in a distributed
+;; way, an ordering on numbers. Each process has a list of numbers, and
+;; the goal is to find an ordering such that P1 < P2 < P3. Each process
+;; picks a number from it's list, and sends it to the previous process
+;; in the chain. If they're not in order, the process first attempt to
+;; backtrack locally, and if it cannot satisfy the constraint, asks the
+;; sender to backtrack. 
 (define e24
   (par-term 
     (id i_1
@@ -350,6 +357,9 @@
           (recv i_1)
           (commit k_5))))))
 
+;; This is an implementation of the above algorithm in a more uniform
+;; way. It requires all the local lists of numbers to be sorted for
+;; greatest to least. We'd like it to not have this restriction.
 (define e25
   (par-term
     (id i_0
@@ -382,6 +392,7 @@
               (send i_0 y))))
     ))
 
+;; This is a contrived test to test sync and commit
 (define e26 
   (par-term
     (id i_0 (let x = (add1 (choose k 2 3)) in
@@ -399,7 +410,7 @@
                    (recv i_0)
                    (commit k)
                    (err "Success"))))))
-
+;; This is a smaller contrive test for commit
 (define e27
   (par-term 
     (id i_0 (let x = (choose k 1 2) in
