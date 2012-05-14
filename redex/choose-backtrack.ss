@@ -241,7 +241,7 @@
     ;; If there is no such k-var, then the backtrack fails, and the
     ;; alternate path must be taken.
     ;;
-    ;; This implementation is prone to a race condition (see
+    ;; XXX: This implementation is prone to a race condition (see
     ;; test e18 and e19).
     (--> (par ((name S0 (i_0 ((k_0 e_0) ...)))
                (in-hole E_0 (backtrack i_1 k_1 e)))
@@ -322,7 +322,7 @@
   (par-term
     (id i_1 (let x = (choose k 1 0) in
       (if (iszero x)
-        (err "Success!")
+        (err "Success")
         (backtrack i_1 k (err "Error")))))))
 
 ;; This example uses choice and backtracking to find, in a distributed
@@ -345,7 +345,7 @@
                        (seq (commit k_1)
                             (send i_2 1)
                             (send i_3 1)
-                            (err "Success!"))
+                            (err "Success"))
                        (backtrack i_1 k_1 (err "Error")))
                      (backtrack i_1 k_1 (err "Error"))))))))
     (id i_2
@@ -362,7 +362,9 @@
 
 ;; This is an implementation of the above algorithm in a more uniform
 ;; way. It requires all the local lists of numbers to be sorted for
-;; greatest to least. We'd like it to not have this restriction.
+;; greatest to least. 
+;;
+;; XXX: We'd like it to not have this restriction.
 (define e25
   (par-term
     (id i_0
@@ -379,7 +381,8 @@
              (let x = (recv i_2) in
                (let y = (choose k_1 5 3 (backtrack i_1 k_0 (err "Error")) (err "Fail")) in 
                  (if (< y x)
-                   (send i_0 y)
+                   (seq (send i_0 y)
+                        (commit k_1))
                    (backtrack i_1 k_1 (err "Error")))))))
     (id i_2
         (seq (choose k_0 unit (backtrack i_3 k_1 (err "Error")) (err "Fail"))
@@ -387,12 +390,14 @@
                (let y = (choose k_1 6 2 (backtrack i_2 k_0 (err "Error")) (err "Fail")) in
                  (if (< y x)
                    (seq (send i_1 y)
-                        (send i_0 y))
+                        (send i_0 y)
+                        (commit k_1))
                    (backtrack i_2 k_1 (err "Error")))))))
     (id i_3
        (let y = (choose k_1 7 2 (err "Fail")) in
          (seq (send i_2 y)
-              (send i_0 y))))
+              (send i_0 y)
+              (commit k_1))))
     ))
 
 ;; This is a contrived test to test sync and commit
@@ -425,6 +430,9 @@
 
 ;; Automatically check all the test cases still work. All test cases
 ;; should normalize, or reduce may not terminate.
+;; 
+;; XXX: I think there is actually some built-in redex tester. But I
+;; didn't know that when I wrote all the testing stuff.
 (require srfi/78)
 
 ;; This tries to normalize an expression. It may not terminate if there
@@ -449,7 +457,9 @@
 (check (reduce e15) => (list (par-term (err "division by zero"))))
 (check (reduce e16) => 
        (list (term (par ((i ((k (add1 (choose k 1))))) 2)))))
-;; e18 and e19 fail due to a race condition that exists due to how
+(check (reduce e17) => (list (par-term unit)))
+
+;; XXX: e18 and e19 fail due to a race condition that exists due to how
 ;; failing backtracking is implemented. They have two normal forms, one
 ;; of which is not the one we want, and it's the one `reduce' finds
 ;; first. If we add a sync point before the backtrack, we can eliminate
@@ -458,15 +468,13 @@
 ;; I'm not sure what a better solution would be. Probably some way to
 ;; checking that the k in question had been introduced, but has now been
 ;; remove by a commit.
-
-#;(check (reduce e17) => (list (par-term unit)))
 #;(check (reduce e18) => (list (term 
                                (par 
                                  ((i_1 
                                    ((k (add1 (choose k 1 (err "Fail"))))))
                                   (err "Fail") ) 
                                  ((i_2 ()) 3)))))
-(check (reduce e19) => (list (term 
+#;(check (reduce e19) => (list (term 
                                (par 
                                  ((i_1 ()) 3)
                                  ((i_2 
@@ -481,16 +489,23 @@
                                (par 
                                  ((i_1 ((k (let x = (choose k 1 0) in
                                              (if (iszero x)
-                                               (err "Success!")
+                                               (err "Success")
                                                (backtrack i_1 k (err "Error"))))))) 
-                                  (err "Success!"))))))
-
-;; This takes a while, but does in fact succeed!
+                                  (err "Success"))))))
+(check (reduce e24) => (list (par-term (id i_1 (err "Success"))
+                                       (id i_2 unit)
+                                       (id i_3 unit))))
+(check (reduce e25) => (list (par-term (id i_0 (err "Success"))
+                                       (id i_1 unit)
+                                       (id i_2 unit)
+                                       (id i_3 unit))))
 (check (reduce e26) => (list (par-term (id i_0 (err "Success"))
                                        (id i_1 (err "Success")))))
+(check (reduce e27) => (list (par-term (id i_0 (err "Success")))))
+
 ;; Here is how to view the evaluation of the example expressions
 #;(traces choose-red-parallel e24)
 
 ;; Here is how to try to normalize an expression without manually
 ;; stepping through the trace graph.
-(reduce e27)
+#;(reduce e27)
