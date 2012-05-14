@@ -3,6 +3,10 @@
 \usepackage{mathpartir}
 \usepackage{amsmath}
 
+\newcommand{\bnfdef}{::=}
+\newcommand{\bnfalt}{\mid}
+\newcommand*{\defeq}{\stackrel{\text{def}}{=}}
+
 \begin{document}
 
 \section{Introduction}
@@ -34,6 +38,24 @@ The current language as modeled in redex is a simple scheme-like
 language, extended to a parallel language with synchronous communication,
 choice points, `failing backtracking', sync points, and commit points.
 
+\subsection{Syntax}
+\noindent
+$
+  I \bnfdef nat\\
+  P \bnfdef S;I;e \bnfalt P \parallel P \\
+  S \bnfdef \cdot \bnfalt S,k \to e \\
+  e \bnfdef v \bnfalt delta_1~e \bnfalt delta_2~e~e \bnfalt e~e \bnfalt
+  error~string \bnfalt let~x~=~e~in~e \bnfalt choose~k~e~\dots \bnfalt
+  seq~e~\dots
+  \bnfalt send~I~v \bnfalt recv~I \bnfalt backtrack~I~k~e \bnfalt sync~I
+ ~k~e \bnfalt commit~k \\
+  v \bnfdef \lambda x.e \bnfalt nat \bnfalt string \bnfalt bool
+  \bnfalt () \\
+  delta_1 \bnfdef add1 \bnfalt sub1 \bnfalt iszero \\
+  delta_2 \bnfdef + \bnfalt - \bnfalt < \\ 
+$
+$I$ is a process ID, S is a local continuation store.
+
 \subsection{Parallelism}
 The language is extended to be parallel by creating a reduction for a
 simple scheme-like language, and defining a new reduction as follows:
@@ -53,9 +75,9 @@ The parallel language is extend with two primitive forms that allow
 synchronous communication. A sample reduction rule follows:
 
 $$
-P_1,E_1[\text{send}~P_2~v] \parallel P_2,E_2[\text{recv}~P_1]
+I_1;E_1[\text{send}~I_2~v] \parallel I_2;E_2[\text{recv}~I_1]
 \Rightarrow
-P_1,E_1[()] \parallel P_2,E_2[v]
+I_1;E_1[()] \parallel I_2;E_2[v]
 $$
 
 \subsection{Choice points}
