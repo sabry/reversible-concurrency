@@ -240,6 +240,9 @@
          (par (S0 (in-hole E_0 unit)) (S1 e_1)))
     ;; If there is no such k-var, then the backtrack fails, and the
     ;; alternate path must be taken.
+    ;;
+    ;; This implementation is prone to a race condition (see
+    ;; test e18 and e19).
     (--> (par ((name S0 (i_0 ((k_0 e_0) ...)))
                (in-hole E_0 (backtrack i_1 k_1 e)))
               (name P1 ((i_1 ((k_3 e_3) ...)) e_5)))
@@ -452,7 +455,9 @@
 ;; first. If we add a sync point before the backtrack, we can eliminate
 ;; the race condition. But, that is an unsatisfactory solution.
 ;;
-;; I'm not sure what a better solution would be.
+;; I'm not sure what a better solution would be. Probably some way to
+;; checking that the k in question had been introduced, but has now been
+;; remove by a commit.
 
 #;(check (reduce e17) => (list (par-term unit)))
 #;(check (reduce e18) => (list (term 
