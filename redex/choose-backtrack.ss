@@ -23,8 +23,8 @@
   [e/p v e/p/v (err s)]
   [e/p/v (e/p e/p) (o1 e/p) (o2 e/p e/p) (seq e/p ... e) (if e/p e e) 
        (let x = e/p in e) ]
-  [o1 add1 sub1 iszero]
-  [o2 + - * / ^ eq? < cons car cdr]
+  [o1 add1 sub1 iszero car cdr]
+  [o2 + - * / ^ eq? < cons]
   [b number true false unit]
   [s string]
   [v b x (lambda x e)]
@@ -503,7 +503,7 @@
                                        (id i_1 (err "Success")))))
 (check (reduce e27) => (list (par-term (id i_0 (err "Success")))))
 
-;; Here is how to view the evaluation of the example expressions
+;; Here is how to view the evaluation of the example expressions.
 #;(traces choose-red-parallel e24)
 
 ;; Here is how to try to normalize an expression without manually

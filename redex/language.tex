@@ -51,8 +51,10 @@ $
  ~k~e \bnfalt commit~k \\
   v \bnfdef \lambda x.e \bnfalt nat \bnfalt string \bnfalt bool
   \bnfalt () \\
-  delta_1 \bnfdef add1 \bnfalt sub1 \bnfalt iszero \\
-  delta_2 \bnfdef + \bnfalt - \bnfalt < \\ 
+  delta_1 \bnfdef add1 \bnfalt sub1 \bnfalt iszero \bnfalt car \bnfalt
+  cdr \\
+  delta_2 \bnfdef + \bnfalt - \bnfalt * \bnfalt / \bnfalt ^{\wedge} \bnfalt eq?
+  \bnfalt cons \bnfalt < \\ 
 $
 $I$ is a process ID, S is a local continuation store.
 
