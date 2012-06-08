@@ -16,20 +16,20 @@
 (define-language choose-backtrack
   [e v (e e) (o1 e) (o2 e e) (seq e ...) (if e e e) (let x = e in e)
      (err s) (choose k e e ...) (commit k) (backtrack i k e)
-     (send i e) (recv i) (sync i k e)] 
+     (send i e) (recv i) (sync i k e) (for x in e do e)] 
   ;; The following are a 'pure' subset that can be evaluated as normal
   ;; lambda-calculus expressions, without choose, backtrack, commit,
   ;; sync, etc.
   [e/p v e/p/v (err s)]
   [e/p/v (e/p e/p) (o1 e/p) (o2 e/p e/p) (seq e/p ... e) (if e/p e e) 
-       (let x = e/p in e) ]
+       (let x = e/p in e) (for x in e/p do e) ]
   [o1 add1 sub1 iszero car cdr]
-  [o2 + - * / ^ eq? < cons]
-  [b number true false unit]
+  [o2 + - * / ^ eq? < cns]
+  [b number true false unit (vcns v v)]
   [s string]
   [v b x (lambda x e)]
   [E hole (E e) (v E) (o1 E) (o2 E e) (o2 v E) (if E e e)
-     (seq v ... E e ... e) (let x = E in e) (send i E)]
+     (seq v ... E e ... e) (let x = E in e) (send i E) (for x in E do e)]
   ;; k variables represent choice points. In a real implementation, they
   ;; might be timestamps. Each variable should be unique (at least in a
   ;; single processes scope), and map to one continuation in the process
@@ -89,10 +89,10 @@
                           (term false))
           (side-condition (and (number? (term b_1)) (number? (term b_2))))]
   [(delta (< v_1 v_2)) (err "< applied to non-numbers")]
-  [(delta (cons v_1 v_2)) ,(cons (term v_1) (term v_2))]
-  [(delta (car b)) ,(car (term v)) (side-condition (pair? (term v)))]
+  [(delta (cns v_1 v_2)) (vcns v_1 v_2)]
+  [(delta (car (vcns v_1 v_2))) v_1]
   [(delta (car v)) (err "car applies to non-pair")]
-  [(delta (cdr b)) ,(cdr (term v)) (side-condition (pair? (term v)))]
+  [(delta (cdr (vcns v_2 v_2))) v_2]
   [(delta (cdr v)) (err "cdr applies to non-pair")])
 
 ;; Substitution
@@ -109,6 +109,11 @@
    (where x_3 ,(variable-not-in (term (x_2 any_3 any_2))
                                 (term x_1)))]
   [(subst x_1 x_1 any_1) any_1]
+  [(subst (for x_1 in any_1 do any_2) x_1 any_3)
+   (for x_1 in (subst any_1 x_1 any_3) do any_2)]
+  [(subst (for x_1 in any_1 do any_2) x_2 any_3)
+   (for x_3 in (subst any_1 x_2 any_3) do (subst (subst-var any_2 x_1 x_3) x_2 any_3))
+   (where x_3 ,(variable-not-in (term (x_2 any_3 any_2)) (term x_1)))]
   [(subst (any_2 ...) x_1 any_1) ((subst any_2 x_1 any_1) ...)]
   [(subst any_2 x_1 any_1) any_2])
 
@@ -137,7 +142,12 @@
   [(local-pure-red (in-hole E (if false e_1 e_2))) 
    (in-hole E e_2)]
   [(local-pure-red (in-hole E (let x = v in e))) 
-   (in-hole E (subst e x v))])
+   (in-hole E (subst e x v))]
+  [(local-pure-red (in-hole E (for x in unit do e)))
+   (in-hole E unit)]
+  [(local-pure-red (in-hole E (for x in (vcns v_1 v_2) do e)))
+   (in-hole E (seq (subst e x v_1) (for x in v_2 do e)))]
+  )
 
 ;; Base reduction; nothing more than parallel lambda-calculus.
 ;;
@@ -427,6 +437,33 @@
                    (commit k_2)
                    (backtrack i_0 k (err "Success")))))))
 
+(define e28
+  (par-term
+   (id i_0 (for x in (cns 0 (cns 0 (cns 0 (cns 0 unit))))
+             do
+             (send i_2 x)))
+   (id i_1 (for x in (cns 1 (cns 1 (cns 1 (cns 1 unit))))
+             do
+             (send i_2 x)))
+   (id i_2 (for x in (cns 1 (cns 0 (cns 1 (cns 0 unit))))
+             do
+             (let y = (choose k (recv i_0) (recv i_1)) in
+               (if (eq? x y) unit (backtrack i_2 k (err "what"))))))))
+
+(define e29
+  (par-term
+   (for x in (cns 0 (cns 1 (cns 2 (cns 3 (cns 4 unit)))))
+             do
+             unit)))
+
+(define e30
+  (par-term
+   (id i_0 (for x in (cns 0 (cns 0 (cns 0 unit)))
+             do
+             (send i_2 x)))
+   (id i_2 (for x in (cns 0 (cns 0 (cns 0 unit)))
+             do
+             (if (eq? x (recv i_0)) unit (backtrack i_2 k (err "what")))))))
 
 ;; Automatically check all the test cases still work. All test cases
 ;; should normalize, or reduce may not terminate.
