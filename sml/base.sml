@@ -30,4 +30,7 @@ struct
       UNeg => "~"
     | UNot => "not"
 
+  datatype cont = Cont of int (* keep track of global continuations *)
+  (* XXX this could almost certainly use a better abstraction *)
+
 end
