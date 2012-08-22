@@ -30,14 +30,18 @@ struct
   fun expToMachine e = ceval (Mem [], e)
 
   fun expsToWorld es =
-        World { running = mapi (fn (e,i) =>
-                                 (Proc i, Time.newTime (), expToMachine e)) es
-               , sending = [], recving = [] }
+        World { dict = ContDict.empty
+              , running =
+                  mapi (fn (e,i) =>
+                         ((Proc i, Time.newTime (), []), expToMachine e)) es
+              , sending = []
+              , recving = []
+              , backing = [] }
 
   fun extractFromConfig (CRetn (MkRetn (_, res))) = res
 
   (* XXX requires that process 0 exists and has finished! *)
-  fun extractFromWorld (World { running = rs, sending = _, recving = _ }) =
+  fun extractFromWorld (World { running = rs, ... }) =
     extractFromConfig (Option.valOf (findProcNum 0 rs))
 
   fun run e =

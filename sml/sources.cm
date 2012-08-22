@@ -11,14 +11,17 @@ group is
 	utils/time.sig
 	utils/time.sml
 
+	base.sml
+
+	utils/contkey.sml
+	utils/contdict.sml
+
 	abt/oper.sig
 	abt/abt.sig
 	abt/abt.sml
 	abt/abtutil.sig
 	abt/abtutil.sml
 
-	base.sml
-	
 	exp/expops.sml
 	exp/exp.sml
 

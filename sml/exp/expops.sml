@@ -19,7 +19,7 @@ struct
   | ESeq
   | ESend of proc * tp
   | ERecv of proc * tp
-  | EChoice of cont (* Choice over a list *)
+  | EChoose of cont (* Choice over a list *)
   | EBack of cont
   
   val eq : t -> t -> bool = curry (op =)
@@ -40,7 +40,7 @@ struct
     | ESeq => #[0, 0]
     | ESend _ => #[0]
     | ERecv _ => #[]
-    | EChoice _ => #[0]
+    | EChoose _ => #[0]
     | EBack _ => #[]
 
   fun toString t =
@@ -59,7 +59,7 @@ struct
     | ESeq => "Seq"
     | ESend _ => "Send"
     | ERecv _ => "Recv"
-    | EChoice (Cont k) => "Choice (" ^ "k#" ^ (Int.toString k) ^ ")"
+    | EChoose (Cont k) => "Choice (" ^ "k#" ^ (Int.toString k) ^ ")"
     | EBack (Cont k) => "Back (" ^ "k#" ^ (Int.toString k) ^ ")"
 
 end

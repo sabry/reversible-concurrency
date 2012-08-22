@@ -54,8 +54,8 @@ struct
   datatype ttime = MkTime of cont * mem * exp
   fun unTime (MkTime x) = x
 
-  datatype tback = MkBack of cont
-  fun unBack (MKBack x) = x
+  datatype tback = MkBack of mem * cont
+  fun unBack (MkBack x) = x
 
   (* A + A + A + A = 4 * A *)
 
@@ -69,6 +69,28 @@ struct
   fun ctime x = CTime (MkTime x)
   fun cback x = CBack (MkBack x)
 
+  (* Utility functions for finding/removing processes in/from lists *)
+
+  fun findProcByNum n [] = NONE
+    | findProcByNum n ((x as ((Proc i, t, _), e)) :: rs) =
+        if i = n then SOME x else findProcByNum n rs
+
+  fun remProcByNum n [] = []
+    | remProcByNum n ((x as ((Proc i, _, _), e)) :: rs) =
+        if i = n then rs else remProcByNum n rs
+
+  fun findProc (Proc p) ls = findProcByNum p ls
+
+  fun remProc (Proc p) ls = remProcByNum p ls
+
+  fun remJustProc p ls =
+    List.map (fn (x, ()) => x) (remProc p (List.map (fn x => (x, ())) ls))
+
+  fun findProcNum p ls =
+    case findProcByNum p ls of
+      NONE => NONE
+    | SOME (_, e) => SOME e
+
   exception Stuck
 
   fun buildConfig s1 (CEval (MkEval (Mem s2, e2))) =
@@ -79,6 +101,9 @@ struct
         csend (Mem (s2 @ s1), e2)
     | buildConfig s1 (CRecv (MkRecv (Mem s2, e2))) =
         crecv (Mem (s2 @ s1), e2)
+    | buildConfig s1 (CBack (MkBack (Mem s2, e2))) =
+        cback (Mem (s2 @ s1), e2)
+    (* XXX nonexhaustive *)
 
   fun runBinop bop e1 e2 =
     case (bop, out e1, out e2) of
@@ -118,8 +143,8 @@ struct
     | ESeq $ #[e1, e2] => ceval (Mem [FSeq e2], e1)
     | ESend ptp $ #[e'] => ceval (Mem [FSend ptp], e')
     | ERecv ptp $ #[] => crecv (Mem [], ptp)
-    | EChoose k # #[e'] => ceval (Mem [FChoose k], e')
-    | EBack k # #[] => cback k
+    | EChoose k $ #[e'] => ceval (Mem [FChoose k], e')
+    | EBack k $ #[] => cback (Mem [], k)
 
 
   (* retn : mem -> exp -> config *)
@@ -152,7 +177,7 @@ struct
           x \ e' => ceval (Mem s, subst e x e'))
 	  | FSeq e2 => ceval (Mem s, e2)
 	  | FSend (p, tp) => csend (Mem s, (p, tp, e))
-    | FChoose k => ctime (Mem s, e)
+    | FChoose k => ctime (k, Mem s, e)
   
   (* step : config -> config, only works if a step can be taken *)
 
@@ -179,7 +204,7 @@ struct
   type extMem = proc * time * (timedEvent list)
 
   datatype world =
-    World of { dict : (proc * time) ContDict.t (* global information *)
+    World of { dict : (proc * time) ContDict.dict (* global information *)
              , running : (extMem * config) list
              , sending : (extMem * (mem * (proc * tp * exp))) list
              , recving : (extMem * (mem * (proc * tp))) list
@@ -191,52 +216,120 @@ struct
     actually used to using them, so my style might be really bad here
   *)
     
-  fun addToRunning (World {dict = d, running = rs, sending = bs, recving = br}) 
+  fun addToRunning
+    (World {dict = d, running = rs, sending = bs, recving = br, backing = bt}) 
                    r =
-    World {running = r :: rs, sending = bs, recving = br }
-  fun addToSending (World {dict = d, running = rs, sending = bs, recving = br})
+    World
+      { dict = d, running = r :: rs, sending = bs, recving = br, backing = bt }
+  fun addToSending
+    (World {dict = d, running = rs, sending = bs, recving = br, backing = bt}) 
                    s =
-    World {running = rs, sending = s :: bs, recving = br }
-  fun addToRecving (World {dict = d, running = rs, sending = bs, recving = br})
+    World
+      {dict = d, running = rs, sending = s :: bs, recving = br, backing = bt }
+  fun addToRecving
+    (World {dict = d, running = rs, sending = bs, recving = br, backing = bt}) 
                    r =
-    World {running = rs, sending = bs, recving = r :: br }
+    World
+      {dict = d, running = rs, sending = bs, recving = r :: br, backing = bt}
+  fun addToBacking
+    (World {dict = d, running = rs, sending = bs, recving = br, backing = bt}) 
+                   b =
+    World
+      {dict = d, running = rs, sending = bs, recving = br, backing = b :: bt}
 
-  fun modifyRunning (World {dict = d, running = rs, sending = bs, recving = br})
+  fun modifyRunning
+    (World {dict = d, running = rs, sending = bs, recving = br, backing = bt}) 
                     r =
-    World {running = r, sending = bs, recving = br }
-  fun modifySending (World {dict = d, running = rs, sending = bs, recving = br})
+    World {dict = d, running = r, sending = bs, recving = br, backing = bt}
+  fun modifySending
+    (World {dict = d, running = rs, sending = bs, recving = br, backing = bt}) 
                     s =
-    World {running = rs, sending = s, recving = br }
-  fun modifyRecving (World {dict = d, running = rs, sending = bs, recving = br})
+    World {dict = d, running = rs, sending = s, recving = br, backing = bt }
+  fun modifyRecving
+    (World {dict = d, running = rs, sending = bs, recving = br, backing = bt}) 
                     r =
-    World {dict = d, running = rs, sending = bs, recving = r }
-  fun modifyDict (World {dict = d, running = rs, sending = bs, recving = br})
+    World {dict = d, running = rs, sending = bs, recving = r, backing = bt }
+  fun modifyBacking
+    (World {dict = d, running = rs, sending = bs, recving = br, backing = _}) 
+                    b =
+    World {dict = d, running = rs, sending = bs, recving = br, backing = b }
+  fun modifyDict
+    (World {dict = d, running = rs, sending = bs, recving = br, backing = bt}) 
                  d' =
-    World {dict = d', running = rs, sending = bs, recving = r }
+    World {dict = d', running = rs, sending = bs, recving = br, backing = bt }
+
+
+
+
+
+
+
+
+  fun backtrackProcess p t (wo as (World w)) =
+    case findProc p (#running w) of
+      SOME ((_, _, evs), _) =>
+        modifyRunning (addToBacking wo (p, t, evs)) (remProc p (#running w))
+    | NONE =>
+      (case findProc p (#sending w) of
+        SOME ((_, _, evs), _) =>
+          modifySending (addToBacking wo (p, t, evs)) (remProc p (#sending w))
+      | NONE =>
+        (case findProc p (#recving w) of
+          SOME ((_, _, evs), _) =>
+            modifyRecving (addToBacking wo (p, t, evs)) (remProc p (#recving w))
+        | NONE =>
+          (case findProc p (List.map (fn x => (x, ())) (#backing w)) of
+            SOME ((_, t', evs), ()) =>
+              if Time.leq t' t
+              then wo
+              else
+                addToBacking (modifyBacking wo (remJustProc p (#backing w))) 
+                             (p, t, evs)
+          | NONE => wo)))
+
+
+
+
+  fun appendToEnd v l =
+    case out l of
+      ENil $ #[] => ECons $$ #[v, l]
+    | ECons $ #[v', l'] => ECons $$ #[v', appendToEnd v l']
+
+  fun chooseAndShuffle e =
+    case out e of
+      ECons $ #[v, l] => (v, appendToEnd v l)
+
+
+
+
+
 
   fun partitionWorld
-        (w as World { dict = d, running = r, sending = bs, recving = br }) =
+        (w as World { dict = d, running = r, sending = bs, recving = br
+                    , backing = bt }) =
     case r of
       [] => w
     | ((p, t, es), CSend cs) :: rs =>
-        addToSending (partitionWorld (modifyRunning w rs)) (p, t, unSend cs)
+        addToSending (partitionWorld (modifyRunning w rs)) 
+                     ((p, t, es), unSend cs)
     | ((p, t, es), CRecv cs) :: rs =>
-        addToRecving (partitionWorld (modifyRunning w rs)) (p, t, unRecv cs)
+        addToRecving (partitionWorld (modifyRunning w rs))
+                     ((p, t, es), unRecv cs)
     | ((p, t, es), CTime (MkTime (k, m, l))) :: rs =>
         let
           val (v, l') = chooseAndShuffle l
           val d' = ContDict.insert d k (p, t)
-          val retnme = ((p, t, (t, Chose (k, l')) :: es), cretn (m, v))
+          val retnme = ((p, t, (t, Chose (m, k, l')) :: es), cretn (m, v))
         in
           modifyDict
             (addToRunning (partitionWorld (modifyRunning w rs)) retnme)
             d'
         end
-    | ((p, t, es), CBack (MkBack k)) :: rs =>
+    | ((p, t, es), CBack (MkBack (m, k))) :: rs =>
         let
           val SOME (p_back, t_back) =
             ContDict.lookup d k (* binding must exist! *)
-          val retnme = ((p, t, es), cretn (ENum 0 $$ #[]))
+          val retnme = ((p, t, es), cretn (m, ENum 0 $$ #[]))
           val beforeBacktracking =
             addToRunning (partitionWorld (modifyRunning w rs)) retnme
         in
@@ -244,36 +337,22 @@ struct
         end
     | r :: rs => addToRunning (partitionWorld (modifyRunning w rs)) r
 
-  fun findProcByNum n [] = NONE
-    | findProcByNum n (x as (Proc i, t, e) :: rs) =
-        if i = n then SOME x else findProcNum n rs
-
-  fun remProcByNum n [] = []
-    | remProcByNum n (x as (Proc i, t, e) :: rs) =
-        if i = n then rs else remProcNum n rs
-
-  fun findProc (Proc p) ls = findProcByNum p ls
-
-  fun remProc (Proc p) ls = remProcByNum p ls
-
-  fun findProcNum p ls =
-    case findProcByNum p ls of
-      NONE => NONE
-    | SOME (_, _, e) => SOME e
 
   (*
     Runs everything that can run for one step, then partitions out those
     that are now blocking.
   *)
 
-  fun runRunners (w as World {running = rs, sending = bs, recving = br}) =
+  fun runRunners
+    (w as World
+      {dict = d, running = rs, sending = bs, recving = br, backing = bt}) =
     partitionWorld
       (modifyRunning w
                      (List.map
-                       (fn (p, t, c) =>
+                       (fn ((p, t, es), c) =>
                          if canStepAlone c
-                         then (p, tick t, step c)
-                         else (p, t, c)) rs))
+                         then ((p, tick t, es), step c)
+                         else ((p, t, es), c)) rs))
 
   (*
     findCompat p tp receivers finds a process in receivers that expects to
@@ -282,7 +361,7 @@ struct
 
   fun findCompat (psend : proc) (precv : proc) (tp : tp) [] = NONE
     | findCompat psend precv tp
-                 ((r as (precvr, t, (m, (expSender, tp')))) :: rs) =
+                 ((r as ((precvr, t, erecv), (m, (expSender, tp')))) :: rs) =
         if psend = expSender andalso precv = precvr
         then SOME (r, rs)
         else
@@ -292,10 +371,13 @@ struct
 
   (* sync sees which blocking processes can communicate and has them do so *)
 
-  fun sync (w as World {dict = d, running = rs, sending = bs, recving = br}) =
+  fun sync
+    (w as World
+      {dict = d, running = rs, sending = bs, recving = br, backing = bt}) =
     let
       fun inspectSenders [] receivers = ([], [], receivers)
-        | inspectSenders ((sender as (psend, t, (s, (precv, tp, v))))::senders)
+        | inspectSenders ((sender as
+                            ((psend, t, esend), (s, (precv, tp, v))))::senders)
                          receivers =
               (case findCompat psend precv tp receivers of
                 NONE =>
@@ -304,20 +386,23 @@ struct
                   in
                     (run, sender :: snd, rcv)
                   end
-              | SOME ((p', t', (s', (_, _))), receivers') =>
+              | SOME (((p', t', erecv), (s', (_, _))), receivers') =>
                   let
                     val (run, snd, rcv) = inspectSenders senders receivers'
                     (* XXX: send should return unit, not 0, but no unit yet *)
                     val newTime = Time.sync t t'
-                    val runAfterSend = (psend, newTime,cretn (s, ENum 0 $$ #[]))
-                    val runAfterRecv = (p', newTime, cretn (s', v))
+                    val runAfterSend =
+                      ((psend, newTime, esend), cretn (s, ENum 0 $$ #[]))
+                    val runAfterRecv =
+                      ((p', newTime, erecv), cretn (s', v))
                   in
                     (runAfterSend :: runAfterRecv :: run, snd, rcv)
                   end)
                   
       val (run, snd, rcv) = inspectSenders bs br
     in
-      World { dict = d, running = rs @ run, sending = snd, recving = rcv }
+      World { dict = d, running = rs @ run, sending = snd, recving = rcv
+            , backing = bt}
     end
 
   (* asyncBacktrack : extMem list ->
@@ -330,6 +415,7 @@ struct
   fun asyncBacktrack bts =
     case bts of
       [] => ([], [], [], [], [])
+      (* Always at least one event to backtrack towards *)
     | (p, t, (tev, ev) :: evs) :: bts =>
         let
           val (backMore, toRun, toSend, toRecv, startBack) = asyncBacktrack bts
@@ -344,16 +430,19 @@ struct
                (backMore, toRun, toSend,
                 ((p, t, evs), rinfo) :: toRecv, (pr, t) :: startBack)
            | Chose (Mem m, k, e) =>
-               (backMore, cretn (Mem (FChoose k :: m), e) :: toRun, toSend,
+               (backMore,
+                ((p, t, evs), cretn (Mem (FChoose k :: m), e)) :: toRun, toSend,
                 toRecv, startBack)
           else
             (case ev of
              Sent (_, (ps, _, _)) =>
-               (evs :: backMore, toRun, toSend, toRecv, (ps, t) :: startBack)
+               ((p, t, evs) :: backMore, toRun, toSend, toRecv,
+                (ps, t) :: startBack)
            | Received (_, (pr, _)) =>
-               (evs :: backMore, toRun, toSend, toRecv, (pr, t) :: startBack)
-           | Chose (k, e) =>
-               (evs :: backMore, toRun, toSend, toRecv, startBack))
+               ((p, t, evs) :: backMore, toRun, toSend, toRecv,
+                (pr, t) :: startBack)
+           | Chose (m, k, e) =>
+               ((p, t, evs) :: backMore, toRun, toSend, toRecv, startBack))
 
         end
 
@@ -371,21 +460,28 @@ struct
       in
         case findProc p forward of
           NONE => (forward, backward, (p, t) :: leftover)
-        | SOME _ => (remProc p forward, (p, t) :: backward, leftover)
+        | SOME ((_, _, evs), _) =>
+            (remProc p forward, (p, t, evs) :: backward, leftover)
       end
 
   (* keepBacktracking : extMem list -> (extMem * unit) list -> extMem list *)
+  (* XXX this type might be bad *)
 
-  fun keepBacktracking backMore startBack =                                  
+  fun keepBacktracking' backMore startBack =                                  
     case backMore of
       [] => []                                                               
     | (x as (p, t, evs)) :: backMore =>
         (case findProc p startBack of                                        
-          NONE => x :: keepBacktracking backMore startBack
-        | SOME ((_, t'), ()) =>                                              
+          NONE => x :: keepBacktracking' backMore startBack
+        | SOME ((_, t', evs'), ()) =>
             if Time.leq t t'
-            then x :: keepBacktracking backMore startBack                    
-            else (p, t', evs) :: keepBacktracking backMore startBack)
+            then x :: keepBacktracking' backMore startBack                    
+            else (p, t', evs) :: keepBacktracking' backMore startBack)
+
+  fun keepBacktracking backMore startBack =
+    keepBacktracking' backMore
+    (* this is an awful hack *)
+                      (List.map (fn (x,y) => ((x,y,[]), ())) startBack)
 
   fun doBacktrack
     (w as World
@@ -404,7 +500,6 @@ struct
 
       (3) Make sure all processes that are currently backtracking are going back
           far enough.
-
     *)
     let
       val (backMore, toRun, toSend, toRecv, startBack) = asyncBacktrack bts
@@ -421,8 +516,9 @@ struct
   (* TODO: maybe also count it as terminating if there's a 'deadlock', but
      process 0 is done? or if 0 is done no matter what? Lots of options *)
 
-  fun finishedWorld (World { running = rs, sending = [], recving = [] }) =
-    not (List.exists (fn (_, _, x) => canStepAlone x) rs)
+  fun finishedWorld
+    (World {dict = d, running = rs, sending = [], recving = [], backing = bt}) =
+      not (List.exists (fn (_, x) => canStepAlone x) rs)
     | finishedWorld _ = false
     
   fun runWorld w =
