@@ -47,7 +47,7 @@ struct
       ELam t $$ #[v \\ (f v)]
     end
   fun @ (e1, e2) = EApp $$ #[e1, e2]
-  val emp = ENil $$ #[]
+  fun emp t = ENil t $$ #[]
   fun cons e1 e2 = ECons $$ #[e1, e2]
 
   fun choose n es = EChoose (Cont n) $$ #[es]

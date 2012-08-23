@@ -2,6 +2,7 @@ structure Var :> VAR =
 struct
 
   type t = string * int
+  type ord_key = t
 
   val counter = ref 0
 

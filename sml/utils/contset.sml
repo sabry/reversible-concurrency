@@ -1,0 +1,1 @@
+structure ContSet = DisjointSetFn (ContOrd)

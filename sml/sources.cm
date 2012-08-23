@@ -3,8 +3,11 @@ group is
 	$/smlnj-lib.cm
 
 	utils/top.sml
+	utils/ord.sig
 	utils/var.sig
 	utils/var.sml
+	utils/context.sig
+	utils/context.sml
 	utils/vectorutil.sig
 	utils/vectorutil.sml
 	utils/listutils.sml
@@ -15,6 +18,10 @@ group is
 
 	utils/contkey.sml
 	utils/contdict.sml
+	utils/disjoint-set.sig
+	utils/disjoint-set.sml
+	utils/contord.sml
+	utils/contset.sml
 
 	abt/oper.sig
 	abt/abt.sig

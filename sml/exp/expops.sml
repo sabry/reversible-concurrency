@@ -12,7 +12,7 @@ struct
   | EUnop of unop
   | ELam of tp
   | EApp
-  | ENil
+  | ENil of tp
   | ECons
   | EListRec
   | ELet
@@ -33,7 +33,7 @@ struct
     | EUnop _ => #[0]
     | ELam _ => #[1]
     | EApp => #[0, 0]
-    | ENil => #[]
+    | ENil _ => #[]
     | ECons => #[0, 0]
     | EListRec => #[0, 0, 2]
     | ELet => #[0, 1]
@@ -52,7 +52,7 @@ struct
     | EUnop uop => unopToString uop
     | ELam tp => "Lambda [" ^ typeToString tp ^ "]"
     | EApp => "App"
-    | ENil => "Nil"
+    | ENil _ => "Nil"
     | ECons => "Cons"
     | EListRec => "ListRec"
     | ELet => "Let"
