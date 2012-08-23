@@ -50,6 +50,10 @@ struct
   val emp = ENil $$ #[]
   fun cons e1 e2 = ECons $$ #[e1, e2]
 
+  fun choose n es = EChoose (Cont n) $$ #[es]
+
+  fun back n = EBack (Cont n) $$ #[]
+
   (*
     f3 is uncurried so we can write 
       fn (x, y) => ...

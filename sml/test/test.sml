@@ -65,6 +65,8 @@ struct
     [ Single ("3 = 3", n 3, n 3)
     , Single ("3 + 4 = 7", (n 3) + (n 4), n 7)
     , Single ("3 * 4 = 12", (n 3) * (n 4), n 12)
+    , Single ("if true then 3 else 4 ==> 3", eif (b true) (n 3) (n 4), n 3)
+    , Single ("if false then 3 else 4 ==> 4", eif (b false) (n 3) (n 4), n 4)
     , Single ("true = true", b true, b true)
     , Single ("true and false = false", (b true) /\ (b false), b false)
     , Single ("true and true = true", (b true) /\ (b true), b true)
@@ -87,6 +89,16 @@ struct
     , Multi ("make sure multi works 2", [(n 3) + (n 4), (n 0)], n 7)
     , Multi ("receiving a value", 
              [recv (Proc 1) TInt, send (Proc 0) TInt (n 0)], n 0)
+    , Multi ("one thread backtracking",
+             [elet (choose 0 (cons (n 0) (cons (n 4) emp)))
+                   (fn x => eif ((`` x) <= (n 0)) (back 0) (`` x))],
+             n 4)
+    , Multi ("two threads backtracking",
+             [ elet (recv (Proc 1) TInt)
+                    (fn x => eif ((`` x) <= (n 0)) (back 0) (`` x))
+             , send (Proc 0) TInt (choose 0 (cons (n 0) (cons (n 4) emp)))
+             ],
+             n 4)
     ]
 
   fun runTest (Single (s, ein, eout)) =
@@ -118,5 +130,15 @@ struct
     in
       ()
     end
+
+  val blarg = 
+             [ elet (recv (Proc 1) TInt)
+                    (fn x => eif ((`` x) <= (n 0)) (back 0) (`` x))
+             , send (Proc 0) TInt (choose 0 (cons (n 0) (cons (n 4) emp)))
+             ]
+
+  val blerg = expsToWorld blarg
+
+  fun runOneStep w = doBacktrack (sync (preempt (runRunners w)))
     
 end

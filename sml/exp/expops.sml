@@ -28,7 +28,7 @@ struct
     case t of
       ENum _ => #[]
     | EBool _ => #[]
-    | EIf => #[0, 0]
+    | EIf => #[0, 0, 0]
     | EBinop _ => #[0, 0]
     | EUnop _ => #[0]
     | ELam _ => #[1]
