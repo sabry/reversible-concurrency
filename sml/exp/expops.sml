@@ -18,7 +18,7 @@ struct
   | ELet
   | ESeq
   | ESend of proc * tp
-  | ERecv of proc * tp
+  | ERecv of proc list * tp
   | EChoose of cont (* Choice over a list *)
   | EBack of cont
   

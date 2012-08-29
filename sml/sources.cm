@@ -32,6 +32,8 @@ group is
 	exp/expops.sml
 	exp/exp.sml
 
+  evalutils.sml
+  singlethreaded.sml
 	conc.sml
 	bexp.sml
 

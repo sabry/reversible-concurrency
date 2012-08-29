@@ -1,3 +1,8 @@
+(*
+  This file is long, but there's a lot of boilerplate and long function defs,
+  thanks mostly to my use of records here.
+*)
+
 structure Conc =
 struct
 
@@ -16,181 +21,7 @@ struct
 
   val tick = Time.tick
 
-  datatype frame =
-    FBinopL of binop * exp | FIf of exp * exp | FBinopR of binop * exp
-  | FUnop of unop | FAppL of exp | FAppR of exp | FConsL of exp
-  | FConsR of exp | FListRec of exp * exp | FLet of exp | FSeq of exp
-  | FSend of proc * tp | FChoose of cont
-
-  datatype status = SEval | SRetn | SSend of proc | SRecv of proc
-
-  fun out2 e = Exp.map out (out e)
-
-  (* The memory for each process/machine. This will eventually change!
-     TODO: turns out I don't think this needs to be part of the config, so
-     maybe this should just be a type alias or something instead *)
-  datatype mem = Mem of frame list
-
-  (* Some type aliases for things so the config type can be slightly nicer *)
-
-  datatype teval = MkEval of mem * exp
-  fun unEval (MkEval x) = x
-
-  datatype tretn = MkRetn of mem * exp
-  fun unRetn (MkRetn x) = x
-
-  (* Keep track of the process, type, and value here, since we know it *)
-  datatype tsend = MkSend of mem * (proc * tp * exp)
-  fun unSend (MkSend x) = x
-
-  (* Keep track of the process and type here, since we know it *)
-  datatype trecv = MkRecv of mem * (proc * tp)
-  fun unRecv (MkRecv x) = x
-
-  (* Make note that this process needs access to the time
-     XXX this feels somewhat un-modular. The current placement of the time
-     makes sense in a vacuum, but since this needs access to it, maybe it should
-     go in the process' memory after all.
-     However, this can be nicely cleaned up in the partitionWorld function,
-     so maybe this is a good way of writing it after all. *)
-  datatype ttime = MkTime of cont * mem * exp
-  fun unTime (MkTime x) = x
-
-  datatype tback = MkBack of mem * cont
-  fun unBack (MkBack x) = x
-
-  (* A + A + A + A = 4 * A *)
-
-  datatype config = CEval of teval | CRetn of tretn | CSend of tsend
-                  | CRecv of trecv | CTime of ttime | CBack of tback
-
-  fun ceval x = CEval (MkEval x)
-  fun cretn x = CRetn (MkRetn x)
-  fun csend x = CSend (MkSend x)
-  fun crecv x = CRecv (MkRecv x)
-  fun ctime x = CTime (MkTime x)
-  fun cback x = CBack (MkBack x)
-
-  (* Utility functions for finding/removing processes in/from lists *)
-
-  fun findProcByNum n [] = NONE
-    | findProcByNum n ((x as ((Proc i, t, _), e)) :: rs) =
-        if i = n then SOME x else findProcByNum n rs
-
-  fun remProcByNum n [] = []
-    | remProcByNum n ((x as ((Proc i, _, _), e)) :: rs) =
-        if i = n then rs else remProcByNum n rs
-
-  fun findProc (Proc p) ls = findProcByNum p ls
-
-  fun remProc (Proc p) ls = remProcByNum p ls
-
-  fun remJustProc p ls =
-    List.map (fn (x, ()) => x) (remProc p (List.map (fn x => (x, ())) ls))
-
-  fun findProcNum p ls =
-    case findProcByNum p ls of
-      NONE => NONE
-    | SOME (_, e) => SOME e
-
-  exception Stuck
-
-  fun buildConfig s1 (CEval (MkEval (Mem s2, e2))) =
-        ceval (Mem (s2 @ s1), e2)
-    | buildConfig s1 (CRetn (MkRetn (Mem s2, e2))) =
-        cretn (Mem (s2 @ s1), e2)
-    | buildConfig s1 (CSend (MkSend (Mem s2, e2))) =
-        csend (Mem (s2 @ s1), e2)
-    | buildConfig s1 (CRecv (MkRecv (Mem s2, e2))) =
-        crecv (Mem (s2 @ s1), e2)
-    | buildConfig s1 (CBack (MkBack (Mem s2, e2))) =
-        cback (Mem (s2 @ s1), e2)
-    (* XXX nonexhaustive *)
-
-  fun runBinop bop e1 e2 =
-    case (bop, out e1, out e2) of
-      (BPlus, ENum n1 $ #[], ENum n2 $ #[]) => ENum (n1 + n2) $$ #[]
-    | (BTimes, ENum n1 $ #[], ENum n2 $ #[]) => ENum (n1 * n2) $$ #[]
-    | (BAnd, EBool b1 $ #[], EBool b2 $ #[]) => EBool (b1 andalso b2) $$ #[]
-    | (BOr, EBool b1 $ #[], EBool b2 $ #[]) => EBool (b1 orelse b2) $$ #[]
-    | (BLeq, ENum n1 $ #[], ENum n2 $ #[]) => EBool (n1 <= n2) $$ #[]
-    | (BLt, ENum n1 $ #[], ENum n2 $ #[]) => EBool (n1 < n2) $$ #[]
-
-  fun runUnop uop e =
-    case (uop, out e) of
-      (UNeg, ENum n $ #[]) => ENum (~n) $$ #[]
-    | (UNot, EBool b $ #[]) => EBool (not b) $$ #[]
-
-  (*
-    step calls eval or retn, based on the state that the code is in. All three
-    of these functions are single-threaded; that is, they act independent of
-    any surrounding state.
-   *)
-
-  (* eval : exp -> config *)
-
-  fun eval e =
-    case (out e) of
-      ENum n $ #[] => cretn (Mem [], e)
-    | EBool b $ #[] => cretn (Mem [], e)
-    | EIf $ #[eb, et, ef] => ceval (Mem [FIf (et, ef)], eb)
-    | EBinop bop $ #[e1, e2] => ceval (Mem [FBinopL (bop, e2)], e1)
-    | EUnop uop $ #[e'] => ceval (Mem [FUnop uop], e')
-    | ELam t $ #[xe] => cretn (Mem [], e)
-    | EApp $ #[e1, e2] => ceval (Mem [FAppL e2], e1)
-    | ENil _ $ #[] => cretn (Mem [], e)
-    | ECons $ #[e1, e2] => ceval (Mem [FConsL e2], e1)
-    | EListRec $ #[el, en, ec] => ceval (Mem [FListRec (en, ec)], el)
-    | ELet $ #[e1, e2] => ceval (Mem [FLet e2], e1)
-    | ESeq $ #[e1, e2] => ceval (Mem [FSeq e2], e1)
-    | ESend ptp $ #[e'] => ceval (Mem [FSend ptp], e')
-    | ERecv ptp $ #[] => crecv (Mem [], ptp)
-    | EChoose k $ #[e'] => ceval (Mem [FChoose k], e')
-    | EBack k $ #[] => cback (Mem [], k)
-
-
-  (* retn : mem -> exp -> config *)
-
-  fun retn (f :: s) e =
-    case f of
-      FBinopL (bop, e2) => ceval (Mem (FBinopR (bop, e) :: s), e2)
-    | FBinopR (bop, e1) => cretn (Mem s, runBinop bop e1 e)
-    | FIf (et, ef) =>
-        (case out e of
-          EBool true $ #[] => ceval (Mem s, et)
-        | EBool false $ #[] => ceval (Mem s, ef))
-    | FUnop uop => cretn (Mem s, runUnop uop e)
-    | FAppL e2 => ceval (Mem (FAppR e :: s), e2)
-    | FAppR e1 =>
-        (case out2 e1 of
-          ELam tp $ #[x \ b] => ceval (Mem s, subst e x b))
-    | FConsL e2 => ceval (Mem (FConsR e :: s), e2)
-    | FConsR e1 => cretn (Mem s, ECons $$ #[e1, e])
-	  | FListRec (en, ec) =>
-        (case out e of
-          ENil _ $ #[] => ceval (Mem s, en)
-        | ECons $ #[head, tail] =>
-            (case out2 ec of
-              x \ (y \ ec') =>
-                ceval (Mem s, subst head x
-                                (subst (EListRec $$ #[tail, en, ec]) y ec'))))
-	  | FLet xe' =>
-        (case out xe' of
-          x \ e' => ceval (Mem s, subst e x e'))
-	  | FSeq e2 => ceval (Mem s, e2)
-	  | FSend (p, tp) => csend (Mem s, (p, tp, e))
-    | FChoose k => ctime (k, Mem s, e)
-  
-  (* step : config -> config, only works if a step can be taken *)
-
-  fun step (CEval (MkEval (Mem s, e))) = buildConfig s (eval e)
-    | step (CRetn (MkRetn (Mem s, e))) = retn s e
-
-  fun canStepAlone (CEval _) = true
-    | canStepAlone (CRetn (MkRetn (Mem (_ :: _), _))) = true
-    | canStepAlone _ = false
-
-  fun runProgram e = if canStepAlone e then runProgram (step e) else e
+  open SingleThreadedEvaluator
 
   (*
     Now we need to write code that deals with the concurrency primitives, send
@@ -198,25 +29,31 @@ struct
   *)
 
   datatype event = Sent of mem * (proc * tp * exp)
-                 | Received of mem * (proc * tp)
+                 | Received of mem * (proc * (proc list) * tp)
                  | Chose of mem * cont * exp
 
   type timedEvent = time * event
 
   type extMem = proc * time * (timedEvent list)
 
+
+  (*
+    The record makes it easy to tell which field of what would otherwise be a
+    tuple is doing what, but at the cost of making a ton of very long lines of
+    code (for example, the functions defined below that modify the world record.
+    I'm not 100% convinced that this is a worthwhile tradeoff, but I'm even less
+    convinced that it would be a good use of time to change it back to tuples at
+    this point.
+  *)
+
   datatype world =
     World of { dict : (proc * time) ContDict.dict (* global information *)
              , running : (extMem * config) list
              , sending : (extMem * (mem * (proc * tp * exp))) list
-             , recving : (extMem * (mem * (proc * tp))) list
+             , recving : (extMem * (mem * (proc list * tp))) list
              , backing : extMem list (* time refers to the time going back to *)
              }
 
-  (*
-    XXX Using records seems like the right thing to do here, but I'm not
-    actually used to using them, so my style might be really bad here
-  *)
     
   fun addToRunning
     (World {dict = d, running = rs, sending = bs, recving = br, backing = bt}) 
@@ -261,29 +98,54 @@ struct
     World {dict = d', running = rs, sending = bs, recving = br, backing = bt }
 
 
-
-
-
-
-
-
-
-
+  (*
+    Appends to the end of an object-language list.
+  *)
 
   fun appendToEnd v l =
     case out l of
       ENil _ $ #[] => ECons $$ #[v, l]
     | ECons $ #[v', l'] => ECons $$ #[v', appendToEnd v l']
 
+  (*
+    Chooses a value from the list and "shuffles" it.
+
+    This is currently implemented by taking the first element, then moving it to
+    the end. The redex machine semantics do not remove choices, so neither does
+    this implementation; moving it to the end is to avoid repeats.
+
+    Another valid implementation would be randomly selecting an element.
+    However, after that, we would need to decide whether we wanted to keep the
+    list the same (replacement) or remove it from the list into a temporary
+    "already chosen" list (without replacement) until everything in the original
+    list has been chosen once.
+  *)
+
   fun chooseAndShuffle e =
     case out e of
       ECons $ #[v, l] => (v, appendToEnd v l)
 
 
-
-  (* added so I can keep partitionWorld relatively clean *)
+  (*
+    added so I can keep partitionWorld relatively clean. Applies the function
+    and an argument to only the first element of a tuple.
+    
+  *)
 
   fun m1 f (x, y) z = (f x z, y)
+
+  (*
+    partitionWorld runs after everything in the runqueue has been stepped. At
+    first, the runqueue contains only expressions that are evaluating or
+    returning, but after step, they could be in any state. This code takes them
+    out of the runqueue and into the appropriate location in the code.
+
+    XXX: The order in which things are run means that some expressions get to
+    run more than one step per "global" step. For example, if something is
+    backtracking, it is put into the backtracking list, then gets backtracked
+    as the next step of global evaluation. This seems potentially undesirable,
+    but I have left it as-is for now in the interest of simplicity.
+  *)
 
   fun partitionWorld
         (w as World { dict = d, running = r, sending = bs, recving = br
@@ -341,12 +203,13 @@ struct
 
   fun findCompat (psend : proc) (precv : proc) (tp : tp) [] = NONE
     | findCompat psend precv tp
-                 ((r as ((precvr, t, erecv), (m, (expSender, tp')))) :: rs) =
-        if psend = expSender andalso precv = precvr
-        then SOME (r, rs)
+                 ((r as ((precvr, t, erecv), (m, (expSenders, tp')))) :: rs) =
+        if precv = precvr andalso List.exists (fn x => x = psend) expSenders
+                          andalso tp = tp'
+        then SOME (r, rs, expSenders)
         else
           (case findCompat psend precv tp rs of
-            SOME (x, rs') => SOME (x, r :: rs')
+            SOME (x, rs', es) => SOME (x, r :: rs', es)
           | NONE => NONE)
 
   (* sync sees which blocking processes can communicate and has them do so *)
@@ -366,10 +229,10 @@ struct
                   in
                     (run, sender :: snd, rcv)
                   end
-              | SOME (((p', t', erecv), (s', (_, _))), receivers') =>
+              | SOME (((p', t', erecv), (s', (_, _))), receivers', rs) =>
                   let
                     val (run, snd, rcv) = inspectSenders senders receivers'
-                    (* XXX: send should return unit, not 0, but no unit yet *)
+                    (* TODO: send should return unit, not 0, but no unit yet *)
                     val newTime = Time.sync t t'
                     val runAfterSend =
                       ((psend, newTime
@@ -377,7 +240,7 @@ struct
                       ,cretn (s, ENum 0 $$ #[]))
                     val runAfterRecv =
                       ((p', newTime
-                       ,(newTime, Received (s', (psend, tp))) :: erecv)
+                       ,(newTime, Received (s', (psend, rs, tp))) :: erecv)
                       ,cretn (s', v))
                   in
                     (runAfterSend :: runAfterRecv :: run, snd, rcv)
@@ -393,8 +256,27 @@ struct
                         extMem list *
                         (extMem * config) list *
                         (extMem * (mem * (proc * tp * exp))) list * 
-                        (extMem * (mem * (proc * tp))) list *
+                        (extMem * (mem * (proc * proc list * tp))) list *
                         (proc * time) list *)
+  
+  (*
+    asyncBacktrack is a busy function. Its high-level goal is to run everything
+    that is currently backtracking through one step of backtracking. That is,
+    each process 'remembers' every choice it has made and every time it has
+    synchronized and keeps that information as a stack; asyncBacktrack moves the
+    process one level up the stack.
+
+    This means that backtracking processes could end up in any state,
+    depending on where they needed to backtrack to. Additionally, they can cause
+    other processes to backtrack. Thus, the return value is a tuple of the
+    various things a backtracking process can become, as well as a list of other
+    processes that need to backtrack and times they need to backtrack to.
+
+    TODO: When writing this commend, it occurred to me that this could probably
+    be done by returning one list of states, then running partitionWorld again.
+    Would still need to preempt other processes, but it would make everything
+    much, much simpler.
+  *)
 
   fun asyncBacktrack bts =
     case bts of
@@ -411,7 +293,7 @@ struct
              Sent (sinfo as (_, (ps, _, _))) =>
                (backMore, toRun, ((p, t, evs), sinfo) :: toSend,
                 toRecv, (ps, t) :: startBack)
-           | Received (rinfo as (_, (pr, _))) =>
+           | Received (rinfo as (_, (pr, _, _))) =>
                (backMore, toRun, toSend,
                 ((p, t, evs), rinfo) :: toRecv, (pr, t) :: startBack)
            | Chose (Mem m, k, e) =>
@@ -423,7 +305,7 @@ struct
              Sent (_, (ps, _, _)) =>
                ((p, t, evs) :: backMore, toRun, toSend, toRecv,
                 (ps, t) :: startBack)
-           | Received (_, (pr, _)) =>
+           | Received (_, (pr, _, _)) =>
                ((p, t, evs) :: backMore, toRun, toSend, toRecv,
                 (pr, t) :: startBack)
            | Chose (m, k, e) =>
@@ -431,10 +313,24 @@ struct
 
         end
 
+  (*
+    asyncBacktrack has extra information in the received stuff. This gets rid
+    of it.
+  *)
+
+  fun cleanReceivedMetadata (e, (m, (p, ps, t))) = (e, (m, (ps, t)))
+
   (* startBacktrack : (proc * time) list -> (extMem * 'a) list ->
                       (extMem * 'a) list *
-                      extMem list (???)
+                      extMem list *
                       extMem list *)
+
+  (*
+    startBacktrack takes a list of process and times and a list of processes
+    (polymorphic, so it can work with any configuration) and returns a list of
+    unchanged processes, a list of processes that are now backtracking, and a
+    list of process time pairs that did not backtrack anything.
+  *)
 
   fun startBacktrack bs ps =
     case bs of
@@ -450,7 +346,14 @@ struct
       end
 
   (* keepBacktracking : extMem list -> (extMem * unit) list -> extMem list *)
-  (* XXX this type might be bad *)
+
+  (*
+    keepBacktracking' takes backMore, a list of processes that are already
+    backtracking, and startBack, a list of processes and times that need to
+    start backtracking (along with some extra data that is there only so
+    some other functions can be reused), and returns the result of updating
+    the backtracking info of each of the already-backtracking processes.
+  *)
 
   fun keepBacktracking' backMore startBack =                                  
     case backMore of
@@ -458,7 +361,7 @@ struct
     | (x as (p, t, evs)) :: backMore =>
         (case findProc p startBack of                                        
           NONE => x :: keepBacktracking' backMore startBack
-        | SOME ((_, t', evs'), ()) =>
+        | SOME ((_, t', _), ()) =>
             if Time.leq t t'
             then x :: keepBacktracking' backMore startBack                    
             else (p, t', evs) :: keepBacktracking' backMore startBack)
@@ -488,14 +391,7 @@ struct
     *)
     let
       val (backMore, toRun, toSend, toRecv, startBack) = asyncBacktrack bts
-(*      val (rs', bts1, startBack) = startBacktrack startBack (rs @ toRun)
-      val (bs', bts2, startBack) = startBacktrack startBack (bs @ toSend)
-      val (br', bts3, startBack) = startBacktrack startBack (br @ toRecv)
-      val backMore = keepBacktracking backMore startBack
-    in
-      World
-        { dict = d, running = rs', sending = bs', recving = br'
-        , backing = backMore @ bts1 @ bts2 @ bts3 } *)
+      val toRecv = List.map cleanReceivedMetadata toRecv
     in
      (World
        { dict = d, running = toRun @ rs, sending = toSend @ bs
@@ -574,8 +470,12 @@ struct
 
   fun typecheckExp (ctx : ctx) (e : exp) : tp * (ContSet.t) =
     case out e of
-      ENum _ $ #[] => (TInt, ContSet.empty)
-    | EBool _ $ #[] => (TInt, ContSet.empty)
+      ` v =>
+        (case Context.lookup ctx v of
+          SOME tp => (tp, [])
+        | NONE => raise TypeError)
+    | ENum _ $ #[] => (TInt, ContSet.empty)
+    | EBool _ $ #[] => (TBool, ContSet.empty)
     | EBinop bop $ #[e1, e2] =>
         let
           val (t1, cs1) = typecheckExp ctx e1
