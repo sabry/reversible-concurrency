@@ -23,6 +23,7 @@ struct
   open Exp;
   open ExpOps;
   open Conc;
+  open TypeChecker;
   open ListUtils;
 
   type exp = Exp.t

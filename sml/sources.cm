@@ -35,6 +35,7 @@ group is
   evalutils.sml
   singlethreaded.sml
 	conc.sml
+  typechecker.sml
 	bexp.sml
 
 	test/test.sml
