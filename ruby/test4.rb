@@ -18,11 +18,11 @@ EM.synchrony do
     cnt = 0;
     while (1)
       case
-        when temp = c1.rcv(true) then
+        when temp = c1.rcv(true) 
           cnt += 1
           ts = Csp.current.timestamp
           puts "Receive from c1 #{temp} at time #{ts}"
-        when temp = c2.rcv(true) then
+        when temp = c2.rcv(true) 
           cnt += 1
           ts = Csp.current.timestamp
           puts "Receive from c2 #{temp} at time #{ts}"
