@@ -26,7 +26,6 @@ class Channel
 
   def snd(d)  
     raise "tx not idle" if (@txstate != IDLE)
-    raise "tx sending nil" if (d == nil)
     Csp.yield while (@rxstate == FWD)
     @data, @req, @txstate = d, Csp.current.timestamp + 1, FWD
     Csp.yield while (@rxstate == IDLE)
@@ -34,9 +33,8 @@ class Channel
     Csp.current.timestamp = @req
   end
 
-  def rcv(nb=false)
+  def rcv
     raise "rx not idle" if (@rxstate != IDLE)
-    return nil if nb & (@txstate != FWD)
     Csp.yield while @txstate == IDLE
     temp = @data
     @ack, @rxstate = [@req, Csp.current.timestamp + 1].max, FWD

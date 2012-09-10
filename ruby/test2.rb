@@ -11,7 +11,7 @@ EM.synchrony do
 
   def receiver(j,c)
     j.times do |i|
-      temp = c.rcv() 
+      temp = c.rcv
       ts = Csp.current.timestamp
       puts "Receive #{temp} at time #{ts}"
     end

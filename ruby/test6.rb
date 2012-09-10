@@ -31,7 +31,7 @@ EM.synchrony do
 
   #
   # Add a thread to check for termination condition
-  # termination condition is when there are no other
+  # -- in this case,  when there are no other
   # remaining Csp processes
   #
 
