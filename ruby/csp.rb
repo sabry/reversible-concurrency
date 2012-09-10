@@ -10,6 +10,12 @@ class Channel
   IDLE = 0
   FWD = 1
 
+  def self.alt(a)
+    while a.shuffle.each { |b| break false if b.call } do
+      Csp.yield
+    end
+  end
+
   def initialize
     @ack = 0
     @req = 0
@@ -38,6 +44,18 @@ class Channel
     @rxstate = IDLE
     Csp.current.timestamp = @ack
     return temp
+  end
+
+  def probe
+    return @txstate == FWD
+  end
+
+  def g(&b)
+    c = self
+    return lambda {  
+      break false if !c.probe
+      b.call(c.rcv)
+      break true }
   end
 end
 
