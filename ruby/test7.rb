@@ -4,7 +4,16 @@ EM.synchrony do
 
  #
  # code for a thread
- # just prints local time stamp and increments it
+ #
+ #  Inside "choose"
+ #      prints iteration and arg shifted in after choose
+ #      increments timestamp
+ # 
+ #      after j iterations, backtracks
+ #
+ #  Final backtrack throws an exception since
+ #  it is outside of the scope of a choose.
+ 3
  #
 
   def pbody(name, j)
@@ -13,9 +22,7 @@ EM.synchrony do
       Csp::Proc.current.choose {
         a = args.shift
         j.times do |i|
-          f = Csp::Proc.current
-          puts "#{name} #{i} time = #{f.timestamp} arg #{a}"
-          f.timestamp = f.timestamp + 1
+          puts "#{name} iteration #{i} arg #{a}"
           Csp::Proc.yield
         end
         Csp::Proc.current.backtrack if args.length > 0
@@ -34,8 +41,7 @@ EM.synchrony do
 
  #
  # Add a thread to check for termination condition
- # termination condition is when there are no other
- # remaining Csp processes
+ # --  when there are no processes other than monitor
  #
 
  Csp::Proc.new {

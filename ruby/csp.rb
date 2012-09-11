@@ -132,11 +132,9 @@ module Csp
     @@processes = 0
 
     def initialize(&blk)
-      @timestamp = -1
+      @timestamp = 0
       @cstack = []
       super {
-        # following works, but assumes we want to allow backtracking !
-        #choose { blk.call}
         blk.call
         @@processes -= 1 
       }
