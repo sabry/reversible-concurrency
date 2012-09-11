@@ -204,4 +204,8 @@ module Csp
       Csp.yield
     end
   end
+
+  def Csp.time
+    Proc.current.timestamp
+  end
 end

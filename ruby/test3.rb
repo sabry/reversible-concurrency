@@ -5,15 +5,14 @@ EM.synchrony do
   def sender(j,c)
     j.times do |i|
       c.snd(i)
-      puts "Send #{i} at time #{Csp::Proc.current.timestamp}"
+      puts "Send #{i} at time #{Csp.time}"
     end
   end
 
   def receiver(j,c)
     j.times do |i|
       temp = c.rcv
-      ts = Csp::Proc.current.timestamp
-      puts "Receive #{temp} at time #{ts}"
+      puts "Receive #{temp} at time #{Csp.time}"
     end
   end
 

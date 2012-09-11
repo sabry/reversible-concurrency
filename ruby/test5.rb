@@ -6,11 +6,11 @@ EM.synchrony do
     a = [
       (lambda { |i|
         c2.snd(i)
-        puts "Send #{i} on c2 at time #{Csp::Proc.current.timestamp}"
+        puts "Send #{i} on c2 at time #{Csp.time}"
       }),
       (lambda { |i|
         c1.snd(i)
-        puts "Send #{i} on c1 at time #{Csp::Proc.current.timestamp}"
+        puts "Send #{i} on c1 at time #{Csp.time}"
         })]
 
     j.times do |i|
@@ -25,13 +25,11 @@ EM.synchrony do
         when c1.probe
           temp = c1.rcv
           cnt += 1
-          ts = Csp::Proc.current.timestamp
-          puts "Receive from c1 #{temp} at time #{ts}"
+          puts "Receive from c1 #{temp} at time #{Csp.time}"
         when c2.probe
           temp = c2.rcv
           cnt += 1
-          ts = Csp::Proc.current.timestamp
-          puts "Receive from c2 #{temp} at time #{ts}"
+          puts "Receive from c2 #{temp} at time #{Csp.time}"
         else 
           Csp.yield
         end 
