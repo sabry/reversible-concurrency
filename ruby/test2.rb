@@ -17,12 +17,12 @@ EM.synchrony do
     end
   end
 
-  c = Csp::Channel.new
+  c = Csp.channel
 
   # create some threads
 
-  Csp::Proc.new { sender(5,c) }.resume
-  Csp::Proc.new { receiver(5,c) }.resume
+  Csp.proc { sender(5,c) }.resume
+  Csp.proc { receiver(5,c) }.resume
 
   #
   # Add a thread to check for termination condition
@@ -30,8 +30,8 @@ EM.synchrony do
   # remaining Csp::Proc processes
   #
 
-  Csp::Proc.new {
-    Csp::Proc.yield while (Csp::Proc.processes > 1)
+  Csp.proc {
+    Csp.yield while (Csp::Proc.processes > 1)
     EM.stop
   }.resume
 end

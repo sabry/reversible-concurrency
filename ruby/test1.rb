@@ -12,15 +12,15 @@ EM.synchrony do
      f = Csp::Proc.current
      puts "#{name} #{i} time = #{f.timestamp}"
      f.timestamp = f.timestamp + 1
-     Csp::Proc.yield
+     Csp.yield
    end
  end
 
  # create some threads
 
- Csp::Proc.new { pbody("proc1", 3) }.resume
- Csp::Proc.new { pbody("proc2", 7) }.resume
- Csp::Proc.new { pbody("another thread", 6) }.resume
+ Csp.proc { pbody("proc1", 3) }.resume
+ Csp.proc { pbody("proc2", 7) }.resume
+ Csp.proc { pbody("another thread", 6) }.resume
 
  #
  # Add a thread to check for termination condition
@@ -28,8 +28,8 @@ EM.synchrony do
  # remaining Csp processes
  #
 
- Csp::Proc.new {
-   Csp::Proc.yield while (Csp::Proc.processes > 1)
+ Csp.proc{
+   Csp.yield while (Csp::Proc.processes > 1)
    EM.stop
  }.resume
 end

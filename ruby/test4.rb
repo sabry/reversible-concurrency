@@ -35,13 +35,13 @@ EM.synchrony do
      end
    end
 
-  c1 = Csp::Channel.new
-  c2 = Csp::Channel.new
+  c1 = Csp.channel
+  c2 = Csp.channel
 
   # create some threads
 
-  Csp::Proc.new { sender(5,c1, c2) }.resume
-  Csp::Proc.new { receiver(5,c1, c2) }.resume
+  Csp.proc { sender(5,c1, c2) }.resume
+  Csp.proc { receiver(5,c1, c2) }.resume
 
   #
   # Add a thread to check for termination condition
@@ -49,8 +49,8 @@ EM.synchrony do
   # remaining Csp::Proc processes
   #
 
-  Csp::Proc.new {
-    Csp::Proc.yield while (Csp::Proc.processes > 1)
+  Csp.proc {
+    Csp.yield while (Csp::Proc.processes > 1)
     EM.stop
   }.resume
 end

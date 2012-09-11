@@ -19,15 +19,15 @@ EM.synchrony do
   def pbody(name, j)
     begin
       args = ["one", "two", "three"]
-      Csp::Proc.current.choose {
+      Csp.choose {
         a = args.shift
         j.times do |i|
           puts "#{name} iteration #{i} arg #{a}"
-          Csp::Proc.yield
+          Csp.yield
         end
-        Csp::Proc.current.backtrack if args.length > 0
+        Csp.backtrack if args.length > 0
       }
-      Csp::Proc.current.backtrack
+      Csp.backtrack
     rescue => msg
       puts "#{name} raised : #{msg}"
     end
@@ -35,17 +35,17 @@ EM.synchrony do
 
  # create some threads
 
- Csp::Proc.new { pbody("proc1", 3) }.resume
- Csp::Proc.new { pbody("proc2", 7) }.resume
- Csp::Proc.new { pbody("another thread", 6) }.resume
+ Csp.proc { pbody("proc1", 3) }.resume
+ Csp.proc { pbody("proc2", 7) }.resume
+ Csp.proc { pbody("another thread", 6) }.resume
 
  #
  # Add a thread to check for termination condition
  # --  when there are no processes other than monitor
  #
-
- Csp::Proc.new {
-   Csp::Proc.yield while (Csp::Proc.processes > 1)
+ 
+ Csp.proc {
+   Csp.yield while (Csp::Proc.processes > 1)
    EM.stop
  }.resume
 end

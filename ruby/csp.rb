@@ -50,13 +50,6 @@ module Csp
   # Channel class
   #
 
-  def Csp.alt(a)
-    while a.shuffle.each { |b| break false if b.call } do
-      Proc.yield
-    end
-  end
-
-
   class Channel
 
     REV  = -1
@@ -158,6 +151,7 @@ module Csp
 
     def backtrack
       # Need to unwind channel events
+      # Reset timestamp to start of context
       @cstack.last.cont.call if @cstack.last
       raise "No saved context !"
     end
@@ -181,4 +175,33 @@ module Csp
     end
   end
 
+  #
+  # Syntactic Sugar
+  #
+
+  def Csp.choose(&blk)
+    Proc.current.choose(&blk)
+  end
+
+  def Csp.backtrack
+    Proc.current.backtrack
+  end
+
+  def Csp.yield
+    Proc.yield
+  end
+
+  def Csp.proc(&blk)
+    Proc.new(&blk)
+  end
+
+  def Csp.channel
+    Channel.new
+  end
+
+  def Csp.alt(a)
+    while a.shuffle.each { |b| break false if b.call } do
+      Csp.yield
+    end
+  end
 end
