@@ -7,14 +7,24 @@ EM.synchrony do
  # just prints local time stamp and increments it
  #
 
- def pbody(name, j)
-   j.times do |i|
-     f = Csp::Proc.current
-     puts "#{name} #{i} time = #{f.timestamp}"
-     f.timestamp = f.timestamp + 1
-     Csp::Proc.yield
-   end
- end
+  def pbody(name, j)
+    begin
+      args = ["one", "two", "three"]
+      Csp::Proc.current.choose {
+        a = args.shift
+        j.times do |i|
+          f = Csp::Proc.current
+          puts "#{name} #{i} time = #{f.timestamp} arg #{a}"
+          f.timestamp = f.timestamp + 1
+          Csp::Proc.yield
+        end
+        Csp::Proc.current.backtrack if args.length > 0
+      }
+      Csp::Proc.current.backtrack
+    rescue => msg
+      puts "#{name} raised : #{msg}"
+    end
+  end
 
  # create some threads
 

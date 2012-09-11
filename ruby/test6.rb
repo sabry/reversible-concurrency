@@ -6,37 +6,37 @@ EM.synchrony do
 
   def sender(name, cnt, c)
     cnt.times do |i|
-      rand(30).times { Csp.yield }
+      rand(30).times { Csp::Proc.yield }
       c.snd "msg:#{i} from #{name}:"
     end
   end
 
   def receiver(cnt,c1, c2)
     cnt.times do 
-      Channel.alt([ 
-                    c1.g { |temp| puts "Receive on c1 #{temp}"},
-                    c2.g { |temp| puts "Receive on c2 #{temp}"} 
-                  ])
+      Csp.alt ([ 
+                c1.g { |temp| puts "Receive on c1 #{temp}"},
+                c2.g { |temp| puts "Receive on c2 #{temp}"} 
+              ])
     end
   end
 
-  c1 = Channel.new
-  c2 = Channel.new
+  c1 = Csp::Channel.new
+  c2 = Csp::Channel.new
 
   # create some threads
 
-  Csp.new { receiver(RUNS * 2,c1, c2) }.resume
-  Csp.new { sender("sender 1", RUNS, c1) }.resume
-  Csp.new { sender("sender 2", RUNS, c2) }.resume
+  Csp::Proc.new { receiver(RUNS * 2,c1, c2) }.resume
+  Csp::Proc.new { sender("sender 1", RUNS, c1) }.resume
+  Csp::Proc.new { sender("sender 2", RUNS, c2) }.resume
 
   #
   # Add a thread to check for termination condition
   # -- in this case,  when there are no other
-  # remaining Csp processes
+  # remaining Csp::Proc processes
   #
 
-  Csp.new {
-    Csp.yield while (Csp.processes > 1)
+  Csp::Proc.new {
+    Csp::Proc.yield while (Csp::Proc.processes > 1)
     EM.stop
   }.resume
 end

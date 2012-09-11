@@ -6,10 +6,10 @@ EM.synchrony do
     j.times do |i|
       if (i % 2) != 0
         c2.snd(i)
-        puts "Send #{i} on c2 at time #{Csp.current.timestamp}"
+        puts "Send #{i} on c2 at time #{Csp::Proc.current.timestamp}"
       else
         c1.snd(i)
-        puts "Send #{i} on c1 at time #{Csp.current.timestamp}"
+        puts "Send #{i} on c1 at time #{Csp::Proc.current.timestamp}"
       end
     end
   end
@@ -21,36 +21,36 @@ EM.synchrony do
         when c1.probe
           temp = c1.rcv
           cnt += 1
-          ts = Csp.current.timestamp
+          ts = Csp::Proc.current.timestamp
           puts "Receive from c1 #{temp} at time #{ts}"
         when c2.probe
           temp = c2.rcv
           cnt += 1
-          ts = Csp.current.timestamp
+          ts = Csp::Proc.current.timestamp
           puts "Receive from c2 #{temp} at time #{ts}"
         else 
-          Csp.yield
+          Csp::Proc.yield
         end 
         break if cnt == j
      end
    end
 
-  c1 = Channel.new
-  c2 = Channel.new
+  c1 = Csp::Channel.new
+  c2 = Csp::Channel.new
 
   # create some threads
 
-  Csp.new { sender(5,c1, c2) }.resume
-  Csp.new { receiver(5,c1, c2) }.resume
+  Csp::Proc.new { sender(5,c1, c2) }.resume
+  Csp::Proc.new { receiver(5,c1, c2) }.resume
 
   #
   # Add a thread to check for termination condition
   # termination condition is when there are no other
-  # remaining Csp processes
+  # remaining Csp::Proc processes
   #
 
-  Csp.new {
-    Csp.yield while (Csp.processes > 1)
+  Csp::Proc.new {
+    Csp::Proc.yield while (Csp::Proc.processes > 1)
     EM.stop
   }.resume
 end
