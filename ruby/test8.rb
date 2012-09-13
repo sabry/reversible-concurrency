@@ -5,19 +5,23 @@ EM.synchrony do
   RUNS = 20
 
   def sender(name, cnt, c)
-    cnt.times do |i|
-      rand(30).times { Csp.yield }
-      c.snd "msg:#{i} from #{name}:"
-    end
+    Csp.choose {
+      cnt.times do |i|
+        rand(30).times { Csp.yield }
+        c.snd "msg:#{i} from #{name}:"
+      end
+    }
   end
 
   def receiver(cnt,c1, c2)
-    cnt.times do 
-      Csp.alt [ 
-                c1.g { |temp| puts "Receive on c1 #{temp}"},
-                c2.g { |temp| puts "Receive on c2 #{temp}"} 
+    Csp.choose {
+      cnt.times do 
+        Csp.alt [ 
+            c1.g { |temp| puts "Receive on c1 #{temp}"},
+            c2.g { |temp| puts "Receive on c2 #{temp}"} 
               ]
-    end
+      end
+    }
   end
 
   c1 = Csp.channel
