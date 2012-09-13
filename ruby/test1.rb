@@ -9,7 +9,7 @@ EM.synchrony do
 
  def pbody(name, j)
    j.times do |i|
-     f = Csp::Proc.current
+     f = Csp::CspProc.current
      puts "#{name} #{i} time = #{f.timestamp}"
      f.timestamp = f.timestamp + 1
      Csp.yield
@@ -18,19 +18,14 @@ EM.synchrony do
 
  # create some threads
 
- Csp.proc { pbody("proc1", 3) }.resume
- Csp.proc { pbody("proc2", 7) }.resume
- Csp.proc { pbody("another thread", 6) }.resume
+ Csp.proc([],[]){
 
- #
- # Add a thread to check for termination condition
- # termination condition is when there are no other
- # remaining Csp processes
- #
+   Csp.proc([], []) { pbody("proc1", 3) }
+   Csp.proc([],[]) { pbody("proc2", 7) }
+   Csp.proc([],[]) { pbody("another thread", 6) }
 
- Csp.proc{
-   Csp.yield while (Csp::Proc.processes > 1)
+   Csp.yield while (Csp::CspProc.processes > 1)
    EM.stop
- }.resume
+ }
 end
 

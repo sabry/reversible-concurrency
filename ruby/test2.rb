@@ -17,22 +17,23 @@ EM.synchrony do
     end
   end
 
-  c = Csp.channel
+  Csp.proc([], []) {
 
-  # create some threads
+    c = Csp.channel
 
-  Csp.proc { sender(5,c) }.resume
-  Csp.proc { receiver(5,c) }.resume
+    # create some threads
 
-  #
-  # Add a thread to check for termination condition
-  # termination condition is when there are no other
-  # remaining Csp::Proc processes
-  #
+    Csp.proc([], [c]) { sender(5,c) }
+    Csp.proc([c],[])  { receiver(5,c) }
 
-  Csp.proc {
-    Csp.yield while (Csp::Proc.processes > 1)
+    #
+    # Add a thread to check for termination condition
+    # termination condition is when there are no other
+    # remaining Csp::Proc processes
+    #
+
+    Csp.yield while (Csp::CspProc.processes > 1)
     EM.stop
-  }.resume
+    }
 end
 

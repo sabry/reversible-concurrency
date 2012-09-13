@@ -24,24 +24,19 @@ EM.synchrony do
     }
   end
 
-  c1 = Csp.channel
-  c2 = Csp.channel
+  Csp.proc([],[]) {
 
-  # create some threads
+    c1 = Csp.channel
+    c2 = Csp.channel
 
-  Csp.proc { receiver(RUNS * 2,c1, c2) }.resume
-  Csp.proc { sender("sender 1", RUNS, c1) }.resume
-  Csp.proc { sender("sender 2", RUNS, c2) }.resume
+    # create some threads
 
-  #
-  # Add a thread to check for termination condition
-  # -- in this case,  when there are no other
-  # remaining Csp::Proc processes
-  #
+    Csp.proc([c1,c2],[]) { receiver(RUNS * 2,c1, c2) }
+    Csp.proc([],[c1]) { sender("sender 1", RUNS, c1) }
+    Csp.proc([],[c2]) { sender("sender 2", RUNS, c2) }
 
-  Csp.proc {
-    Csp.yield while (Csp::Proc.processes > 1)
+    Csp.yield while (Csp::CspProc.processes > 1)
     EM.stop
-  }.resume
+  }
 end
 

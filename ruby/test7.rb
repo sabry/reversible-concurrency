@@ -35,18 +35,13 @@ EM.synchrony do
 
  # create some threads
 
- Csp.proc { pbody("proc1", 3) }.resume
- Csp.proc { pbody("proc2", 7) }.resume
- Csp.proc { pbody("another thread", 6) }.resume
+ Csp.proc([],[]) {
+    Csp.proc([],[]) { pbody("proc1", 3) }
+    Csp.proc([],[]) { pbody("proc2", 7) }
+    Csp.proc([],[]) { pbody("another thread", 6) }
 
- #
- # Add a thread to check for termination condition
- # --  when there are no processes other than monitor
- #
- 
- Csp.proc {
-   Csp.yield while (Csp::Proc.processes > 1)
-   EM.stop
- }.resume
+    Csp.yield while (Csp::CspProc.processes > 1)
+    EM.stop
+  }
 end
 

@@ -1,6 +1,14 @@
 require "em-synchrony"
 require "continuation"
 
+#
+# to do --
+#     move the "event" stuff out of channels, it doesn't
+#     belong there.  Every time a process inherits or creates
+#     a channel, add that to the current context
+#     break should take care of that !
+#
+
 module Csp
 
   # constants used in this module
@@ -26,7 +34,10 @@ module Csp
     IDLE = 0
     FWD = 1
 
-    def initialize
+    attr_accessor :senders
+    attr_accessor :receivers
+
+    def initialize (f)
       @ack = 0
       @req = 0
       @data = nil
@@ -34,42 +45,49 @@ module Csp
       @rxstate = IDLE
       @txint = false
       @rxint = false
-      f = Proc.current
-      f.event(f.timestamp, self, CHAN_EV) if f.is_a?(Proc)
+      f.event(f.timestamp, self, CHAN_EV) 
+      @senders = [f]
+      @receivers = [f]
     end
 
     def snd(d)  
-      raise "tx not idle" if (@txstate != IDLE)
+      f = CspProc.current
+      unless f == @senders.last
+        raise "#{f} not current sender #{@senders.last}" 
+      end
+      raise "tx not idle" unless @txstate == IDLE
       Csp.yield while (@rxstate == FWD)
 
       # do the handshake
 
-      @data, @req, @txstate = d, Proc.current.timestamp + 1, FWD
+      @data, @req, @txstate = d, f.timestamp + 1, FWD
       Csp.yield while (@rxstate == IDLE)
       @req, @txstate = @ack, IDLE
 
       # save the event
 
-      Proc.current.timestamp = @req
-      Proc.current.event(@req, self, SND_EV)
+      f.timestamp = @req
+      f.event(@req, self, SND_EV)
 
     end
 
     def rcv
-      raise "rx not idle" if (@rxstate != IDLE)
+      f = CspProc.current
+      raise "not current sender" unless f == @receivers.last
+      raise "rx not idle" unless @rxstate == IDLE
       Csp.yield while @txstate == IDLE
 
       # do the handshake
 
       temp = @data
-      @ack, @rxstate = [@req, Proc.current.timestamp + 1].max, FWD
+      @ack, @rxstate = [@req, f.timestamp + 1].max, FWD
       Csp.yield while (@txstate == FWD)
       @rxstate = IDLE
-      Proc.current.timestamp = @ack
+      f.timestamp = @ack
 
       # save the event
 
-      Proc.current.event(@ack, self, RCV_EV)
+      f.event(@ack, self, RCV_EV)
 
       # return received value
 
@@ -92,7 +110,7 @@ module Csp
   # class variable processes keeps track of live Csp processes
   # timestamp used for local clock
 
-  class Proc < Fiber
+  class CspProc < Fiber
 
     RUN = 0
     REV = 1
@@ -146,13 +164,17 @@ module Csp
     end
 
     def initialize(&blk)
-      @timestamp = 0
+      f = CspProc.current
+      @timestamp = f.is_a?(CspProc) ? f.timestamp + 1 : 0
       @cstack = []
-      f = Proc.current
-      f.event(f.timestamp, self, PROC_EV) if f.is_a?(Proc)
+      f.event(f.timestamp, self, PROC_EV) if f.is_a?(CspProc)
       super {
         @state = RUN
-        blk.call
+        callcc {|cc|           
+          @cstack.push Context.new(cc, @timestamp)
+          blk.call
+        }
+        # need to release any channels and procs here
         @state = DEAD
         @@processes -= 1 
       }
@@ -173,13 +195,10 @@ module Csp
       # if we implement fork/join
 
       oldcontext = pop
-
-      # merge events from popped context
-
-      ev = oldcontext.rcv_event
-      ev.keys.each {|k| event(ev[k], k, RCV_EV)}
-      ev = oldcontext.snd_event
-      ev.keys.each {|k| event(ev[k], k, SND_EV)}
+      
+      #
+      # Need to release any channels and procs here
+      #
     end
 
     def backtrack
@@ -242,6 +261,10 @@ module Csp
         Fiber.yield
       end while reverse! 
     end
+
+    def channel
+      c = Channel.new(self)
+    end
   end
 
   #
@@ -249,23 +272,26 @@ module Csp
   #
 
   def Csp.choose(&blk)
-    Proc.current.choose(&blk)
+    CspProc.current.choose(&blk)
   end
 
   def Csp.backtrack
-    Proc.current.backtrack
+    CspProc.current.backtrack
   end
 
   def Csp.yield
-    Proc.current.yield
+    CspProc.current.yield
   end
 
-  def Csp.proc(&blk)
-    Proc.new(&blk)
+  def Csp.proc(cin, cout, &blk)
+    p = CspProc.new(&blk)
+    cin.each {|c|  c.receivers.push p}
+    cout.each {|c| c.senders.push p}
+    p.resume
   end
 
   def Csp.channel
-    Channel.new
+    CspProc.current.channel
   end
 
   def Csp.alt(a)
@@ -275,6 +301,6 @@ module Csp
   end
 
   def Csp.time
-    Proc.current.timestamp
+    CspProc.current.timestamp
   end
 end
