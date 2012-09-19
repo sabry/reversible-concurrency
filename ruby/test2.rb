@@ -17,14 +17,14 @@ EM.synchrony do
     end
   end
 
-  Csp.proc([], []) {
+  Csp.proc("root",[], []) {
 
-    c = Csp.channel
+    c = Csp.channel("c")
 
     # create some threads
 
-    Csp.proc([], [c]) { sender(5,c) }
-    Csp.proc([c],[])  { receiver(5,c) }
+    Csp.proc("sender", [], [c]) { sender(5,c) }
+    Csp.proc("receiver", [c],[])  { receiver(5,c) }
 
     #
     # Add a thread to check for termination condition

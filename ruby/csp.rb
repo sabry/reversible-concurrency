@@ -6,38 +6,35 @@ require "continuation"
 #     move the "event" stuff out of channels, it doesn't
 #     belong there.  Every time a process inherits or creates
 #     a channel, add that to the current context
-#     break should take care of that !
+#     backtrack, exit should take care of cleaning up the context
 #
 
 module Csp
 
-  # constants used in this module
+  # channel states
 
-  Infinity =  1.0/0.0
-  SND_EV = 0     # send on channel
-  RCV_EV = 1     # receive from channel
+  SND_EV  = 0    # send on channel
+  RCV_EV  = 1    # receive from channel
   PROC_EV = 2    # create a process
   CHAN_EV = 3    # create a channel
+  
+  # process states
 
-  #
-  # Context Class -- should this be local to Proc ?
-  #
-
-
-  #
-  # Channel class
-  #
+  DEFUNCT = -1   # dead
+  RUN     = 0        # normal mode
+  BACK    = 1        # reversing
 
   class Channel
 
     REV  = -1
     IDLE = 0
-    FWD = 1
+    FWD  = 1
 
-    attr_accessor :senders
-    attr_accessor :receivers
+    attr_reader   :ack
+    attr_reader   :req
+    attr_reader   :name
 
-    def initialize (f)
+    def initialize(name, f) 
       @ack = 0
       @req = 0
       @data = nil
@@ -45,49 +42,42 @@ module Csp
       @rxstate = IDLE
       @txint = false
       @rxint = false
-      f.event(f.timestamp, self, CHAN_EV) 
-      @senders = [f]
-      @receivers = [f]
+      @name = name
+    end
+
+    def to_s
+      "chan #{@name} ack=#{@ack} req=#{@req} txstate=#{@txstate}" +
+        " rxstate=#{@rxstate} txint=#{@txint} rxint=#{@rxint}"
     end
 
     def snd(d)  
       f = CspProc.current
-      unless f == @senders.last
-        raise "#{f} not current sender #{@senders.last}" 
-      end
       raise "tx not idle" unless @txstate == IDLE
-      Csp.yield while (@rxstate == FWD)
+      raise "timestamp error" unless f.timestamp >= @req
 
       # do the handshake
 
+      Csp.yield while (@rxstate == FWD) or (@txint)
       @data, @req, @txstate = d, f.timestamp + 1, FWD
       Csp.yield while (@rxstate == IDLE)
       @req, @txstate = @ack, IDLE
-
-      # save the event
-
       f.timestamp = @req
-      f.event(@req, self, SND_EV)
 
     end
 
     def rcv
       f = CspProc.current
-      raise "not current sender" unless f == @receivers.last
       raise "rx not idle" unless @rxstate == IDLE
-      Csp.yield while @txstate == IDLE
+      raise "timestamp error" unless f.timestamp >= @ack
 
       # do the handshake
 
+      Csp.yield while @txstate == IDLE
       temp = @data
       @ack, @rxstate = [@req, f.timestamp + 1].max, FWD
       Csp.yield while (@txstate == FWD)
       @rxstate = IDLE
       f.timestamp = @ack
-
-      # save the event
-
-      f.event(@ack, self, RCV_EV)
 
       # return received value
 
@@ -105,19 +95,48 @@ module Csp
         b.call(c.rcv)
         break true }
     end
-  end
 
-  # class variable processes keeps track of live Csp processes
-  # timestamp used for local clock
+    def rev?
+      return true if @rxint 
+      return true if @txint  
+      return true if (@rxstate == REV) 
+      return true if (@txstate == REV)
+      return false
+    end
+
+    def txrev(ts)
+      if (@rxstate == IDLE) and (@txstate == IDLE) and (ts < @req)
+        @txstate, @req = REV, ts
+      end
+      if (@rxstate == REV) and !(@txstate == IDLE)
+        @txstate, @ack, @rxint = IDLE, @ack, false
+      end
+      if (@txstate == FWD) and (ts <  @req)
+        @rxint = true 
+      end
+    end
+    
+    def rxrev(ts)
+      if (ts < @ack) and (@txstate == IDLE) and (@rxstate == IDLE)
+        @txint = true 
+      end
+
+      if (ts < @ack) and (@rxstate == IDLE) and !(@txstate == IDLE)
+        @rxstate,@ack, @txint = REV, [ts, @req].min, false
+      end
+
+      @rxstate = IDLE if (@rxstate == REV) and (@txstate = IDLE)
+    end
+  end
 
   class CspProc < Fiber
 
-    RUN = 0
-    REV = 1
-    DEAD = 2
 
-    attr_accessor :timestamp
     @@processes = 0
+
+    attr_reader :state
+    attr_reader :name
+    attr_accessor :timestamp
 
     #
     # process contexts -- includes
@@ -131,89 +150,101 @@ module Csp
 
     class Context
 
-      attr_reader :snd_event
-      attr_reader :rcv_event
-      attr_reader :chan_event
-      attr_reader :proc_event
       attr_reader :cont
       attr_reader :timestamp
+      attr_reader :snd_port
+      attr_reader :rcv_port
+
+      # attr_reader :chans
+      # attr_accessor :procs
 
       def initialize(cc,ts)
         @cont       = cc
         @timestamp  = ts
-        @rcv_event  = Hash.new(Infinity)
-        @snd_event  = Hash.new(Infinity)
-        @chan_event = Hash.new
-        @proc_event = Hash.new
+        @rcv_port  = Hash.new
+        @snd_port  = Hash.new
+        @name = "default"
       end
+
 
       def event(ts, obj, ev)
         case ev
         when SND_EV
-          @snd_event[obj] = [ts, @snd_event[obj]].min
+          @snd_port[obj]  = ts
         when RCV_EV
-          @rcv_event[obj] = [ts, @rcv_event[obj]].min
-        when PROC_EV
-          @proc_event[obj] = ts
-        when CHAN_EV
-          @chan_event[obj] = ts
+          @rcv_port[obj]  = ts
         else
           raise "unexpected event!"
         end
       end
+
+      def reap
+        # this might be the place to
+        # clean up -- still undecided
+      end
     end
 
-    def initialize(&blk)
-      f = CspProc.current
-      @timestamp = f.is_a?(CspProc) ? f.timestamp + 1 : 0
-      @cstack = []
-      f.event(f.timestamp, self, PROC_EV) if f.is_a?(CspProc)
-      super {
-        @state = RUN
-        callcc {|cc|           
-          @cstack.push Context.new(cc, @timestamp)
-          blk.call
+
+
+    def initialize(name, ts,cin,cout,&blk)
+      @timestamp = ts
+      @state = RUN
+      @name = name
+      
+      super() {
+        callcc {|cc|
+          # set up initial context
+          @cstack = [ Context.new(cc, @timestamp) ]
+          cin.each {|c|  
+            # c.receivers.push CspProc.current
+            event(c.ack, c, RCV_EV)
+          }
+          cout.each {|c| 
+            # c.senders.push CspProc.current
+            event(c.req, c, SND_EV)
+          }
+          blk.call           # call process code
         }
-        # need to release any channels and procs here
-        @state = DEAD
+        @state = DEFUNCT
         @@processes -= 1 
       }
       @@processes += 1
     end
 
+    def to_s
+      "proc #{@name} state=#{@state} time=#{@timestamp}"
+    end
+
+
     def event(ts, chan, tp )
-      @cstack.last.event(ts, chan, tp) if @cstack.last
+      @cstack.last.event(ts, chan, tp)
     end
 
     def choose(&blk)
       @timestamp += 1
-      callcc {|cc| push Context.new(cc, @timestamp)}
+      # create a new context
+      callcc {|cc| 
+        cout = @cstack.last.snd_port
+        cin = @cstack.last.rcv_port
+        push Context.new(cc, @timestamp)
+        cout.each { |c,ts| event(c.req, c, SND_EV)}
+        cin.each { |c,ts| event(c.ack, c, RCV_EV)} 
+      }
       blk.call
-
-      # under what conditions do we terminate ?
-      # may need a list of "zombies" to reap
-      # if we implement fork/join
-
+      # destroy context
       oldcontext = pop
-      
-      #
-      # Need to release any channels and procs here
-      #
     end
 
     def backtrack
 
       raise "No saved context !" if (@cstack.length == 0)
       
-      # unwind events -- done in yield
-
-      @state = REV
-      Csp.yield 
-
-      # Reset timestamp to start of context
+      @state = BACK
+      @timestamp = @cstack.last.timestamp
+      Csp.yield while reverse!
+      
       # call saved continuation
 
-      @timestamp = @cstack.last.timestamp
       @cstack.last.cont.call 
 
     end
@@ -229,41 +260,57 @@ module Csp
     def reverse?
       # check all channels in context to see if 
       # reverse is requested
+
+      cout = @cstack.last.snd_port
+      cin = @cstack.last.rcv_port
+
+      cout.each {|c,ts| 
+        return true if c.rev?
+      }
+      cin.each {|c,ts| 
+        return true if c.rev? 
+      }
       return false
     end
 
     def reverse!
-      if (reverse?)
-        backtrack if @STATE = FWD
-
-         # run channels backwards
-         # may need to call backtrack again !
-
+      cout = @cstack.last.snd_port
+      cout.each {|c,ts| c.txrev(ts)}
+      cin = @cstack.last.rcv_port
+      cin.each {|c,ts| c.rxrev(ts) }
+      
+      if reverse?
+        return true
       else
-        @STATE = RUN
-        return FALSE
-      end
-
-      # if we're done then go back to forward execution
-      @state = RUN if @state = REV
+        @state = RUN
+        return false
+        end 
     end
-
 
     def self.processes 
       @@processes 
     end
+    
+    # think about how to clean up the dead
+    # should probably check 
+
+    #
+    # Busy work should be state dependent.
+    #   -- e.g. communicating should check for
+    #      defunct children
+    #      
 
     def yield
-      Fiber.yield if @state == DEAD
-      begin
-        f = self
-        EM.next_tick {f.resume}
-        Fiber.yield
-      end while reverse! 
+      f = self
+      backtrack if (@state == RUN) and reverse?
+      EM.next_tick {
+        f.resume unless @state == DEFUNCT
+      }
+      Fiber.yield
     end
 
-    def channel
-      c = Channel.new(self)
+    def channel(name)
+      Channel.new(name, self)
     end
   end
 
@@ -283,15 +330,18 @@ module Csp
     CspProc.current.yield
   end
 
-  def Csp.proc(cin, cout, &blk)
-    p = CspProc.new(&blk)
-    cin.each {|c|  c.receivers.push p}
-    cout.each {|c| c.senders.push p}
+  def Csp.proc(name, cin, cout, &blk)
+    f = CspProc.current
+    ts = f.is_a?(CspProc) ? f.timestamp : 0
+    p = CspProc.new(name, ts,cin,cout) {blk.call}
     p.resume
+    # put proc in parent's context
+    #f.event(f.timestamp, p, PROC_EV) if f.is_a?(CspProc)
+    return p
   end
 
-  def Csp.channel
-    CspProc.current.channel
+  def Csp.channel(name)
+    CspProc.current.channel(name)
   end
 
   def Csp.alt(a)

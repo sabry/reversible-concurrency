@@ -16,13 +16,13 @@ EM.synchrony do
     end
   end
 
-  Csp.proc([],[]) {
-    c = Csp.channel
+  Csp.proc("root",[],[]) {
+    c = Csp.channel("c")
 
     # create some threads
 
-    Csp.proc([],[c]) { sender(5,c) }
-    Csp.proc([c],[]) { receiver(5,c) }
+    Csp.proc("sender",[],[c]) { sender(5,c) }
+    Csp.proc("receiver", [c],[]) { receiver(5,c) }
 
     Csp.yield while (Csp::CspProc.processes > 1)
     EM.stop

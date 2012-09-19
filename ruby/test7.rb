@@ -35,10 +35,10 @@ EM.synchrony do
 
  # create some threads
 
- Csp.proc([],[]) {
-    Csp.proc([],[]) { pbody("proc1", 3) }
-    Csp.proc([],[]) { pbody("proc2", 7) }
-    Csp.proc([],[]) { pbody("another thread", 6) }
+ Csp.proc("root",[],[]) {
+    Csp.proc("p1",[],[]) { pbody("proc1", 3) }
+    Csp.proc("p2",[],[]) { pbody("proc2", 7) }
+    Csp.proc("p3",[],[]) { pbody("another thread", 6) }
 
     Csp.yield while (Csp::CspProc.processes > 1)
     EM.stop

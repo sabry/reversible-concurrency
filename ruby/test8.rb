@@ -24,16 +24,16 @@ EM.synchrony do
     }
   end
 
-  Csp.proc([],[]) {
+  Csp.proc("root",[],[]) {
 
-    c1 = Csp.channel
-    c2 = Csp.channel
+    c1 = Csp.channel("c1")
+    c2 = Csp.channel("c2")
 
     # create some threads
 
-    Csp.proc([c1,c2],[]) { receiver(RUNS * 2,c1, c2) }
-    Csp.proc([],[c1]) { sender("sender 1", RUNS, c1) }
-    Csp.proc([],[c2]) { sender("sender 2", RUNS, c2) }
+    Csp.proc("receiver",[c1,c2],[]) { receiver(RUNS * 2,c1, c2) }
+    Csp.proc("sender 1",[],[c1]) { sender("sender 1", RUNS, c1) }
+    Csp.proc("sender 2",[],[c2]) { sender("sender 2", RUNS, c2) }
 
     Csp.yield while (Csp::CspProc.processes > 1)
     EM.stop
