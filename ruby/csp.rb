@@ -18,11 +18,13 @@ module Csp
   PROC_EV = 2    # create a process
   CHAN_EV = 3    # create a channel
   
-  # process states
+  # process states -- to do add blocked state for communication
+  # so we can detect deadlock
 
   DEFUNCT = -1   # dead
-  RUN     = 0        # normal mode
-  BACK    = 1        # reversing
+  RUN     = 0    # normal mode
+  BLOCK   = 1
+  BACK    = 2    # reversing
 
   class Channel
 
@@ -57,11 +59,13 @@ module Csp
 
       # do the handshake
 
+      f.state = BLOCK
       Csp.yield while (@rxstate == FWD) or (@txint)
       @data, @req, @txstate = d, f.timestamp + 1, FWD
       Csp.yield while (@rxstate == IDLE)
       @req, @txstate = @ack, IDLE
       f.timestamp = @req
+      f.state = RUN
 
     end
 
@@ -72,12 +76,14 @@ module Csp
 
       # do the handshake
 
+      f.state = BLOCK
       Csp.yield while @txstate == IDLE
       temp = @data
       @ack, @rxstate = [@req, f.timestamp + 1].max, FWD
       Csp.yield while (@txstate == FWD)
       @rxstate = IDLE
       f.timestamp = @ack
+      f.state = RUN
 
       # return received value
 
@@ -93,15 +99,16 @@ module Csp
       return lambda {  
         break false if !c.probe
         b.call(c.rcv)
-        break true }
+        break true 
+      }
     end
 
     def rev?
-      return true if @rxint 
-      return true if @txint  
-      return true if (@rxstate == REV) 
-      return true if (@txstate == REV)
-      return false
+      if @rxint or @txint or (@rxstate == REV) or (@txstate == REV)
+        return true
+      else
+        return false
+      end
     end
 
     def txrev(ts)
@@ -111,30 +118,25 @@ module Csp
       if (@rxstate == REV) and !(@txstate == IDLE)
         @txstate, @ack, @rxint = IDLE, @ack, false
       end
-      if (@txstate == FWD) and (ts <  @req)
-        @rxint = true 
-      end
+      @rxint = true if (@txstate == FWD) and (ts <  @req)
     end
     
     def rxrev(ts)
       if (ts < @ack) and (@txstate == IDLE) and (@rxstate == IDLE)
         @txint = true 
       end
-
       if (ts < @ack) and (@rxstate == IDLE) and !(@txstate == IDLE)
         @rxstate,@ack, @txint = REV, [ts, @req].min, false
       end
-
       @rxstate = IDLE if (@rxstate == REV) and (@txstate = IDLE)
     end
   end
 
   class CspProc < Fiber
 
-
     @@processes = 0
 
-    attr_reader :state
+    attr_accessor :state
     attr_reader :name
     attr_accessor :timestamp
 
@@ -203,8 +205,8 @@ module Csp
             # c.senders.push CspProc.current
             event(c.req, c, SND_EV)
           }
-          blk.call           # call process code
         }
+        blk.call           # call process code
         @state = DEFUNCT
         @@processes -= 1 
       }
@@ -214,7 +216,6 @@ module Csp
     def to_s
       "proc #{@name} state=#{@state} time=#{@timestamp}"
     end
-
 
     def event(ts, chan, tp )
       @cstack.last.event(ts, chan, tp)
@@ -227,11 +228,13 @@ module Csp
         cout = @cstack.last.snd_port
         cin = @cstack.last.rcv_port
         push Context.new(cc, @timestamp)
-        cout.each { |c,ts| event(c.req, c, SND_EV)}
-        cin.each { |c,ts| event(c.ack, c, RCV_EV)} 
+        cout.each { |c,ts| 
+          event(c.req, c, SND_EV)}
+        cin.each { |c,ts|
+          event(c.ack, c, RCV_EV)} 
       }
       blk.call
-      # destroy context
+      # exit choose, destroy context
       oldcontext = pop
     end
 
@@ -241,12 +244,15 @@ module Csp
       
       @state = BACK
       @timestamp = @cstack.last.timestamp
+
+      # run backwards
+
       Csp.yield while reverse!
       
       # call saved continuation
 
-      @cstack.last.cont.call 
 
+      @cstack.last.cont.call 
     end
 
     def push(c)
@@ -274,17 +280,18 @@ module Csp
     end
 
     def reverse!
-      cout = @cstack.last.snd_port
-      cout.each {|c,ts| c.txrev(ts)}
-      cin = @cstack.last.rcv_port
-      cin.each {|c,ts| c.rxrev(ts) }
       
+      # move things backward
+
+      @cstack.last.snd_port.each {|c,ts| c.txrev(ts)}
+      @cstack.last.rcv_port.each {|c,ts| c.rxrev(ts) }
+
       if reverse?
         return true
       else
         @state = RUN
         return false
-        end 
+      end 
     end
 
     def self.processes 
@@ -302,7 +309,7 @@ module Csp
 
     def yield
       f = self
-      backtrack if (@state == RUN) and reverse?
+      backtrack if ((@state == RUN) or (@state == BLOCK)) and reverse?
       EM.next_tick {
         f.resume unless @state == DEFUNCT
       }

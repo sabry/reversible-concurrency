@@ -2,15 +2,13 @@ require_relative 'csp'
 
 EM.synchrony do
 
-  RUNS = 4
+  RUNS = 6
 
   def sender(name, cnt, c)
-    Csp.choose {
-      cnt.times do |i|
-        c.snd i
-        puts "!! send #{i}"
-      end
-    }
+    cnt.times do |i|
+      c.snd i
+      puts "!! send #{i}"
+    end
     puts "!!!!!!!!!! sender done !"
   end
   
@@ -21,7 +19,7 @@ EM.synchrony do
       while 1
         j = c.rcv
         puts "!! receive #{j}"
-        break if j == 3
+        break if j == (cnt - 1)
         if (j == i)
           i += 1
           puts "!! backtrack i = #{i}"

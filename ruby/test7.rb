@@ -11,9 +11,6 @@ EM.synchrony do
  # 
  #      after j iterations, backtracks
  #
- #  Final backtrack throws an exception since
- #  it is outside of the scope of a choose.
- 3
  #
 
   def pbody(name, j)
@@ -27,7 +24,6 @@ EM.synchrony do
         end
         Csp.backtrack if args.length > 0
       }
-      Csp.backtrack
     rescue => msg
       puts "#{name} raised : #{msg}"
     end
