@@ -20,7 +20,7 @@ EM.synchrony do
 
  Csp.proc("root",[],[]){
 
-   Csp.proc("proc1",[], []) { pbody("proc1", 3) }
+   Csp.proc("proc1",[],[]) { pbody("proc1", 3) }
    Csp.proc("proc2",[],[]) { pbody("proc2", 7) }
    Csp.proc("proc3",[],[]) { pbody("another thread", 6) }
 
