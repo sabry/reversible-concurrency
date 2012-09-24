@@ -2,7 +2,7 @@ require_relative 'csp'
 
 EM.synchrony do
 
-  def p1(c12,c21)
+  def p1(c12,c21,cdone)
     flag = true
     j = -1
     Csp.choose {
@@ -20,11 +20,12 @@ EM.synchrony do
         Csp.backtrack 
       end
     }
+    cdone.snd 0 # to tell partner to terminate
     puts "!!!!!!!!!! p1 result = #{j}"
     puts "!!!!!!!!!! p2 done !"
   end
   
-  def p2(c12,c21)
+  def p2(c12,c21,cdone)
     j = c12.rcv
     res = -1
     if (j == 1)
@@ -38,8 +39,7 @@ EM.synchrony do
       c21.snd 1
       res = 10
     end
-# without the next line p2 finishes and p1 blocks; BAD
-    rand(30).times { Csp.yield } 
+    cdone.rcv # if I finish I won't be able to backtrack
     puts "!!!!!!!!!! p2 result = #{res}"
     puts "!!!!!!!!!! p2 done !"
   end
@@ -48,11 +48,12 @@ EM.synchrony do
 
     c12 = Csp.channel("p1->p2")
     c21 = Csp.channel("p2->p1")
+    cdone = Csp.channel("p1 done")
 
     # create some threads
 
-    Csp.proc("p1",[c21],[c12]) { p1(c12,c21) } 
-    Csp.proc("p2",[c12],[c21]) { p2(c12,c21) }
+    Csp.proc("p1",[c21],[c12,cdone]) { p1(c12,c21,cdone) } 
+    Csp.proc("p2",[c12,cdone],[c21]) { p2(c12,c21,cdone) }
     Csp.yield while (Csp::CspProc.processes > 1)
     EM.stop
   }
