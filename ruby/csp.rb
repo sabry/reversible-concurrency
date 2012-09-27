@@ -360,4 +360,8 @@ module Csp
   def Csp.time
     CspProc.current.timestamp
   end
+
+  def Csp.name
+    CspProc.current.name
+  end
 end

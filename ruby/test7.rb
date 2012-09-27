@@ -13,28 +13,28 @@ EM.synchrony do
  #
  #
 
-  def pbody(name, j)
+  def pbody(j)
     begin
       args = ["one", "two", "three"]
       Csp.choose {
         a = args.shift
         j.times do |i|
-          puts "#{name} iteration #{i} arg #{a}"
+          puts "#{Csp.name} iteration #{i} arg #{a}"
           Csp.yield
         end
         Csp.backtrack if args.length > 0
       }
     rescue => msg
-      puts "#{name} raised : #{msg}"
+      puts "#{Csp.name} raised : #{msg}"
     end
   end
 
  # create some threads
 
  Csp.proc("root",[],[]) {
-    Csp.proc("p1",[],[]) { pbody("proc1", 3) }
-    Csp.proc("p2",[],[]) { pbody("proc2", 7) }
-    Csp.proc("p3",[],[]) { pbody("another thread", 6) }
+    Csp.proc("p1",[],[]) { pbody(3) }
+    Csp.proc("p2",[],[]) { pbody(7) }
+    Csp.proc("p3",[],[]) { pbody(6) }
 
     Csp.yield while (Csp::CspProc.processes > 1)
     EM.stop
