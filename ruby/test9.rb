@@ -15,7 +15,7 @@ EM.synchrony do
   def receiver(cnt,c)
     i = 0
     j = 0
-    Csp.choose {
+    Csp.stable {
       while 1
         j = c.rcv
         puts "!! receive #{j}"

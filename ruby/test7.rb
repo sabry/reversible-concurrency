@@ -5,8 +5,8 @@ EM.synchrony do
  #
  # code for a thread
  #
- #  Inside "choose"
- #      prints iteration and arg shifted in after choose
+ #  Inside "stable"
+ #      prints iteration and arg shifted in after stable
  #      increments timestamp
  # 
  #      after j iterations, backtracks
@@ -16,7 +16,7 @@ EM.synchrony do
   def pbody(j)
     begin
       args = ["one", "two", "three"]
-      Csp.choose {
+      Csp.stable {
         a = args.shift
         j.times do |i|
           puts "#{Csp.name} iteration #{i} arg #{a}"

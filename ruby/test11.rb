@@ -52,9 +52,10 @@ EM.synchrony do
 
     # create some threads
 
-    Csp.proc("p1",[c21],[c12,cdone]) { p1(c12,c21,cdone) } 
-    Csp.proc("p2",[c12,cdone],[c21]) { p2(c12,c21,cdone) }
-    Csp.yield while (Csp::CspProc.processes > 1)
+    Csp.par [ 
+        Csp.proc("p1",[c21],[c12,cdone]) { p1(c12,c21,cdone) } ,
+        Csp.proc("p2",[c12,cdone],[c21]) { p2(c12,c21,cdone) }
+      ]
     EM.stop
   }
 end
