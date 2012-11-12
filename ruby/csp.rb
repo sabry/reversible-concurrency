@@ -12,7 +12,7 @@ require "continuation"
 module Csp
 
   def Csp.log(ll)
-    1 < ll
+    return 1 < ll
   end
 
   # channel states
@@ -64,8 +64,8 @@ module Csp
     def snd(d)  
       f = CspProc.current
       raise "${f.name} not current sender in #{@name}" unless f == self.sender.last
-      raise "tx not idle in #{@name}" unless @txstate == IDLE
-      raise "timestamp error #{@name}" unless f.timestamp >= @req
+      raise "tx not idle in #{self}" unless @txstate == IDLE
+      raise "timestamp error #{self} timestmp #{f.timestamp}" unless f.timestamp >= @req
 
       # do the handshake
 
@@ -76,6 +76,8 @@ module Csp
 
       Csp.yield while (@rxstate == IDLE)
       @req, @txstate = @ack, IDLE
+
+      Csp.yield while (@rxstate != IDLE)
       
       # update process state
 
@@ -145,7 +147,6 @@ module Csp
     #
 
     def txrev(ts)
-
       if (@rxstate == IDLE) and (@txstate == IDLE) and (ts < @req)
         puts "txrev #{self} #{ts}" if Csp.log(1)
         @txstate, @req = REV, ts
@@ -158,6 +159,11 @@ module Csp
         puts "txrev #{self} #{ts}" if Csp.log(1)
         @rxint = true 
       end
+      # this shouldn't be necessary !
+#      if (@rxstate == FWD) and (@txstate == IDLE)
+#        puts "txrev #{self} #{ts}" if Csp.log(1)
+#        @rxint = true 
+#      end
     end
 
     #
