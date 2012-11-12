@@ -12,7 +12,7 @@ require "continuation"
 module Csp
 
   def Csp.log(ll)
-    return 1 < ll
+    return false #1 < ll
   end
 
   # channel states
