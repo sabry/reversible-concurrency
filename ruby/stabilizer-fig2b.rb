@@ -4,20 +4,22 @@ EM.synchrony do
 
   def t1 (c,c2) 
     count = 2
-    puts "Entering t1"
     Csp.stable {
-      puts "t1 entering stable region I"
-      puts "t1 sending first message to t2"
-      c.snd 0
-    }
-    puts "t1 exited stable region I"
-    Csp.stable {
-      puts "t1 entering stable region II"
-      puts "t1 sending second message to t2"
-      c.snd 0
-      count = count - 1
-      puts "t1 backtracking..." if count > 0
-      Csp.backtrack if count > 0
+      puts "Entering t1"
+      Csp.stable {
+        puts "t1 entering stable region I"
+        puts "t1 sending first message to t2"
+        c.snd 0
+      }
+      puts "t1 exited stable region I"
+      Csp.stable {
+        puts "t1 entering stable region II"
+        puts "t1 sending second message to t2"
+        c.snd 0
+        count = count - 1
+        puts "t1 backtracking..." if count > 0
+        Csp.backtrack if count > 0
+      }
     }
     puts "t1 sending final message to t2"
     c2.snd 0
