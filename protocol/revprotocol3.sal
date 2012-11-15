@@ -1,0 +1,224 @@
+revprotocol3: CONTEXT =
+BEGIN
+
+	%% so far we're only able to prove this for finite times
+
+ TIME : TYPE = [0..10000];
+ STATE : TYPE = { rev, idle, fwd };
+
+ tx : MODULE =
+  BEGIN
+   INPUT  rxstate   : STATE
+   OUTPUT txstate   : STATE
+   INPUT  ack       : TIME
+   OUTPUT req       : TIME
+   OUTPUT rxint     : BOOLEAN    %% Interrupt receiver
+   INPUT  txint     : BOOLEAN    %% Interrupt request by receiver
+
+   INITIALIZATION
+
+     txstate = idle;
+     req = 0;
+     rxint = false;
+
+   TRANSITION
+   [
+      %% fwd transaction			 
+                                          
+     (rxstate = idle) AND (txstate = idle) --> 
+		      txstate' = fwd;
+  	      	      req' IN { x : TIME | x > req}
+
+   [](rxstate = fwd) AND (txstate = fwd) --> 
+		      txstate' = idle;
+                      rxint' = false;
+                      req' = ack
+
+   %% Waiting for receiver -- ask receiver to reverse !
+
+   [] (txstate = fwd) --> rxint' = true;
+
+   %% rev transaction
+
+   []  (rxstate = idle) AND (txstate = idle) --> 
+		      txstate' = rev;
+ 	              req' IN { x : TIME | x < req}
+
+   [] (rxstate = rev) AND (txstate /= idle) -->
+		      txstate' = idle;
+                      req' = ack;
+                      rxint' = false;
+
+   ]
+   END;
+
+ rx : MODULE = 
+    BEGIN
+        INPUT  txstate   : STATE
+        OUTPUT rxstate   : STATE
+        INPUT  req       : TIME
+        OUTPUT ack       : TIME
+        INPUT  rxint     : BOOLEAN
+        OUTPUT txint     : BOOLEAN
+
+    INITIALIZATION
+
+	rxstate = idle;
+        ack = 0;
+	txint = false;
+
+    TRANSITION
+    [
+
+       %% Acknowlege fwd transaction -- capture data
+
+       (txstate = fwd) AND (rxstate = idle)   --> 
+       		       rxstate' = fwd;
+     	     	       ack' IN { x : TIME | x >= req};
+                       txint' = false
+
+    [] (txstate = idle) AND (rxstate /= idle)    --> rxstate' = idle
+
+      %% Ask transmitter to reverse !
+
+    [] (rxstate = idle) AND (txstate = idle) --> txint' = true
+
+      %% Acknowledge reverse transation
+
+    [] (rxstate = idle) AND (txstate /= idle) --> rxstate' = rev;
+      	     	                       ack' IN { x : TIME | x <= req AND x < ack};	
+				       txint' = false
+    ]
+   END;
+
+ txbuf : MODULE =
+  BEGIN
+    INPUT txstate   : STATE
+    INPUT req       : TIME
+    INPUT rxint     : BOOLEAN
+    OUTPUT btxstate : STATE
+    OUTPUT breq     : TIME
+    OUTPUT brxint   : BOOLEAN
+
+
+    INITIALIZATION
+
+    btxstate = idle;
+    breq = 0;
+    brxint = false;
+
+TRANSITION
+[
+   true --> btxstate' = txstate; breq' = req; brxint' = rxint
+]
+END;
+
+
+rxbuf : MODULE =
+  BEGIN
+    INPUT rxstate   : STATE
+    INPUT ack       : TIME
+    INPUT txint     : BOOLEAN
+    OUTPUT brxstate : STATE
+    OUTPUT back     : TIME
+    OUTPUT btxint   : BOOLEAN
+
+  INITIALIZATION
+
+    brxstate = idle;
+    back = 0;
+    btxint = false;
+
+  TRANSITION
+  [
+    true --> brxstate' = rxstate; back' = ack; btxint' = txint
+  ]
+END;
+
+
+
+
+system : MODULE = ((RENAME rxstate to brxstate, ack to back, txint to btxint IN tx) []
+                   (RENAME txstate to btxstate, req to breq, rxint to brxint IN  rx) []
+                    rxbuf [] txbuf);
+
+
+% Invariant lemma -- proved for unbounded state
+
+% sal-inf-bmc  -d 1 -i revprotocol3.sal l1
+
+% main theorem, only proved for finite state
+
+% sal-smc  revprotocol3.sal th1
+
+% sal-smc  revprotocol3.sal th2
+
+l1 : LEMMA system |- G (
+% stable states
+	        (((txstate = btxstate) AND (rxstate = brxstate)) AND
+		 (((txstate = idle) AND (rxstate = idle)) OR
+                  ((txstate = fwd) AND (rxstate = fwd)) OR
+                  ((txstate = fwd) AND (rxstate = rev)) OR
+                  ((txstate = rev) AND (rxstate /= fwd)) OR
+		  ((txstate = fwd) AND (rxstate = idle)) OR
+                  ((txstate = idle) AND (rxstate /= idle)))) OR
+
+% Transitions between stable states
+% II -> FI
+		((txstate = fwd) AND (btxstate = idle) AND
+                 (rxstate = idle) AND (brxstate = idle)) OR
+% II -> RI
+		((txstate = rev) AND (btxstate = idle) AND
+                 (rxstate = idle) AND (brxstate = idle)) OR
+% FI -> FF
+
+		((txstate = fwd) AND (btxstate = fwd) AND
+                 (rxstate = fwd) AND (brxstate = idle)) OR
+% FI -> FR
+		((txstate = fwd) AND (btxstate = fwd) AND
+                 (rxstate = rev) AND (brxstate = idle)) OR
+
+% RI -> RR
+		((txstate = rev) AND (btxstate = rev) AND
+                 (rxstate = rev) AND (brxstate = idle)) OR
+% RR -> IR
+		((txstate = idle) AND (btxstate = rev) AND
+                 (rxstate = rev) AND (brxstate = rev)) OR
+% IR -> RR
+		((txstate = idle) AND (btxstate = idle) AND
+                 (rxstate = idle) AND (brxstate = rev)) OR
+% FR -> IR
+		((txstate = idle) AND (btxstate = fwd) AND
+                 (rxstate = rev) AND (brxstate = rev)) OR
+% FF -> IF
+		((txstate = idle) AND (btxstate = fwd) AND
+                 (rxstate = fwd) AND (brxstate = fwd)) OR
+% IF -> II
+		((txstate = idle) AND (btxstate = idle) AND
+                 (rxstate = idle) AND (brxstate = fwd)));
+
+
+%
+% Main theorem  buffered system -- properties of sequence numbers
+% validated
+%
+
+th1 : LEMMA system |- G ( 
+          ( txstate = idle => req = ack) AND
+          ( (txstate = fwd AND rxstate /= fwd) => req > ack) AND
+          ( (txstate = rev AND rxstate /= rev) => req < ack) AND
+          ( rxstate = fwd  => ack >= req) AND
+          ( rxstate = rev  => ack <= req));
+
+%
+% Check that "interrupts" correspond to sensible states
+%
+
+th2 : LEMMA system |- G (
+      	  ( rxint => txstate = fwd) AND
+          ( brxint => btxstate = fwd) AND
+	  ( txint => rxstate = idle) AND
+          ( btxint => brxstate = idle));
+
+END
+
