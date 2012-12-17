@@ -36,6 +36,8 @@ module Csp
     IDLE = 0
     FWD  = 1
 
+    @@nextid = 0
+    attr_reader   :id
     attr_reader   :ack
     attr_reader   :req
     attr_reader   :name
@@ -54,6 +56,8 @@ module Csp
       @sender = []
       @receiver = []
       @name = name
+      @id = @@nextid
+      @@nextid += 1
     end
 
     def to_s
@@ -75,13 +79,16 @@ module Csp
       @data, @req, @txstate = d, f.timestamp + 1, FWD
 
       Csp.yield while (@rxstate == IDLE)
+
+      receiver = self.receiver.last
       @req, @txstate = @ack, IDLE
+
+      f.sync(@req, "C#{@id}S#{@req}","C#{@id}R#{@req}");
 
       Csp.yield while (@rxstate != IDLE)
       
       # update process state
 
-      f.timestamp = @req
       f.state = RUN
 
     end
@@ -97,15 +104,17 @@ module Csp
       f.state = BLOCK
 
       Csp.yield while @txstate == IDLE
+      sender = self.sender.last
       temp = @data
       @ack, @rxstate = [@req, f.timestamp + 1].max, FWD
+      f.sync(@ack, "C#{@id}R#{@ack}","C#{@id}S#{@ack}");
 
       Csp.yield while (@txstate == FWD)
       @rxstate = IDLE
 
       #update process state
 
-      f.timestamp = @ack
+
       f.state = RUN
 
       # return received value
@@ -159,11 +168,6 @@ module Csp
         puts "txrev #{self} #{ts}" if Csp.log(1)
         @rxint = true 
       end
-      # this shouldn't be necessary !
-#      if (@rxstate == FWD) and (@txstate == IDLE)
-#        puts "txrev #{self} #{ts}" if Csp.log(1)
-#        @rxint = true 
-#      end
     end
 
     #
@@ -188,10 +192,14 @@ module Csp
   class CspProc < Fiber
 
     @@processes = 0
+    @@nextid = 0
+    @@root = nil
 
     attr_accessor :state
     attr_reader :name
     attr_accessor :timestamp
+    attr_reader :id
+    attr_reader :timstart
 
     #
     # process contexts -- includes
@@ -211,6 +219,7 @@ module Csp
       attr_reader   :rcv_port
       attr_accessor :chans
       attr_accessor :procs
+      attr_accessor :trace
       attr_reader   :cin
       attr_reader   :cout
 
@@ -221,6 +230,7 @@ module Csp
         @snd_port   = Hash.new
         @procs      = []
         @chans      = []
+        @trace      = []
         @name = "default"
       end
 
@@ -231,7 +241,7 @@ module Csp
         when RCV_EV
           @rcv_port[obj]  = ts
         when PROC_EV
-          @procs.push obj
+          @procs.push [obj,ts]
         when CHAN_EV
           @chans.push obj
           obj.sender.push self
@@ -240,19 +250,38 @@ module Csp
           raise "unexpected event!"
         end
       end
+      def pnodes(ofile, indent)
+        h = Hash.new()
+        @trace.each { |t|
+          if h[t[1]].nil?
+            ofile.puts "#{indent}  #{t[1]} [label = \"#{t[0]}\"];"
+            h[t[1]] = 1;
+          end
+        }
+      end
+
+      def ptrans(ofile, indent)
+        @trace.each { |t| ofile.puts "#{indent} #{t[1]} -> #{t[2]};" unless t[2].nil? 
+        }
+      end
     end
 
     def initialize(name, ts,cin,cout,&blk)
       @timestamp = ts
+      @timstart  = ts
       @state = RUN
       @name = name
       @cin = cin
       @cout = cout
+      @id = @@nextid
+      @@nextid += 1
       
       super() {
         callcc {|cc|
           # set up initial context
+          @@root = self if @@root.nil?
           @cstack = [ Context.new(cc, @timestamp) ]
+          @cstack.last.trace.push([@timestamp, "P#{@id}N#{@timestamp}"])
           @cin.each {|c| 
             event(c.ack, c, RCV_EV) 
             c.receiver.push self 
@@ -284,8 +313,12 @@ module Csp
       "proc #{@name} state=#{@state} time=#{@timestamp}"
     end
 
-    def event(ts, chan, tp )
-      @cstack.last.event(ts, chan, tp)
+    def event(ts, obj, tp )
+      @cstack.last.event(ts, obj, tp)
+      if (tp == PROC_EV)
+        evtrace = [ts,"P#{@id}N#{ts}","P#{obj.id}N#{obj.timstart}"]
+        @cstack.last.trace.push(evtrace)
+      end
     end
 
     def stable(&blk)
@@ -295,6 +328,7 @@ module Csp
         cout = @cstack.last.snd_port
         cin = @cstack.last.rcv_port
         @cstack.push Context.new(cc, @timestamp)
+        @cstack.last.trace.push([@timestamp, "P#{@id}N#{@timestamp}"])
         cout.each { |c,ts| event(c.req, c, SND_EV)}
         cin.each { |c,ts| event(c.ack, c, RCV_EV)} 
       }
@@ -323,9 +357,10 @@ module Csp
 
       # kill all our children
       
-      @cstack.last.procs.each {|p| p.kill unless p.state == DEFUNCT}
-      @cstack.last.procs.each {|p| Csp.yield unless p.state == DEFUNCT}
+      @cstack.last.procs.each {|p| p[0].kill unless p[0].state == DEFUNCT}
+      @cstack.last.procs.each {|p| Csp.yield unless p[0].state == DEFUNCT}
       @cstack.last.procs = []
+
 
       # release all channels created
 
@@ -337,6 +372,11 @@ module Csp
         puts "#{self} in backtrack" if Csp.log(1)
         Csp.yield 
       end
+
+      # erase trace history
+      
+      ts = @cstack.last.timestamp
+      @cstack.last.trace = [[ts, "P#{@id}N#{ts}"]]
 
       puts "#{self} exiting backtrack" if Csp.log(1)
       
@@ -395,8 +435,17 @@ module Csp
       end 
     end
 
+    def sync(ts, from, to)
+      @timestamp = ts
+      @cstack.last.trace.push([ts, from, to]);
+    end
+
     def self.processes 
       @@processes 
+    end
+
+    def self.root
+      @@root
     end
     
     def yield
@@ -409,14 +458,41 @@ module Csp
     def kill
       #puts "#{@name} being killed"
       while oldcontext = @cstack.pop
-        oldcontext.procs.each {|p| p.kill if p.state != DEFUNCT }
-        oldcontext.procs.each {|p| yield if p.state != DEFUNCT  }
+        oldcontext.procs.each {|p| p[0].kill if p[0].state != DEFUNCT }
+        oldcontext.procs.each {|p| yield if p[0].state != DEFUNCT  }
       end
       cleanup
     end
 
     def channel(name)
       Channel.new(name, self)
+    end
+
+    def ptrans(ofile, indent)
+      @cstack.each { |ctxt| ctxt.ptrans(ofile, indent) }
+    end
+
+    def pgraph(ofile)
+      def pcluster(ofile, cs, indent)
+        unless cs.empty?
+          ctxt = cs.shift
+          ts = ctxt.timestamp
+          nm =  (ts == @timstart) ? "#{@name},#{ts}" : "#{ts}"
+          ofile.puts "#{indent}subgraph cluster_p#{@id}_#{ts} {"
+          ofile.puts "#{indent}  label = \"#{nm}\";"
+          ofile.puts "#{indent}  labeljust = \"right\";"
+          ofile.puts "#{indent}  color = blue"
+          pcluster(ofile, cs, "#{indent}  ")
+          ctxt.pnodes(ofile, indent);
+          ofile.puts "#{indent} }"
+        end
+      end
+
+        
+      pcluster(ofile, Array.new(@cstack), "  ")
+      @cstack.each { |c| c.procs.each { |p| p[0].pgraph(ofile) }}
+      @cstack.each { |c| c.procs.each { |pc| pc[0].ptrans(ofile,"  ")}}
+      ptrans(ofile, "  ");
     end
   end
 
@@ -470,5 +546,18 @@ module Csp
 
   def Csp.current
     CspProc.current
+  end
+
+  def Csp.pdump(filename, p=nil)
+    if (p)
+      p.pgraph(ofile)
+    else
+      ofile = File.open(filename, "w")
+      ofile.puts "strict digraph G {"
+      ofile.puts "  concentrate=true;"
+      CspProc.root.pgraph(ofile)
+      ofile.puts "}"
+      ofile.close
+    end
   end
 end
