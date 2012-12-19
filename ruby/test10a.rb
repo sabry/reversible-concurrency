@@ -1,5 +1,7 @@
 require_relative 'csp'
 
+Csp.Trace(Pathname.new(__FILE__).basename(".rb"))
+
 EM.synchrony do
 
   def p1(c12,c21,cdone)
@@ -13,13 +15,15 @@ EM.synchrony do
         c12.snd 2
         puts "!! p1 sending 2"
       end
+      Csp.pdump()
+      Csp.tick()
       j = c21.rcv
       if j == 0
         flag = false
         puts "!! p1 received 0; backtracking"
         Csp.backtrack 
       end
-      Csp.pdump("test10a_trace.dot")
+      Csp.pdump()
     }
     cdone.snd 0 # to tell partner to terminate
     puts "!!!!!!!!!! p1 result = #{j}"

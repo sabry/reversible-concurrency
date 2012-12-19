@@ -1,5 +1,6 @@
 require "em-synchrony"
 require "continuation"
+require "pathname"
 
 #
 # to do --
@@ -10,6 +11,23 @@ require "continuation"
 #
 
 module Csp
+
+  @@traceno = 0
+  @@tracefile = nil
+
+  def self.TraceFile()
+
+    if (@@tracefile.nil?)
+      nil
+    else
+      @@traceno += 1
+      [ '%s%03d.dot' % [@@tracefile, @@traceno-1], @@traceno-1]
+    end
+  end
+
+  def self.Trace(tf)
+    @@tracefile = tf
+  end
 
   def Csp.log(ll)
     return false #1 < ll
@@ -83,7 +101,9 @@ module Csp
       receiver = self.receiver.last
       @req, @txstate = @ack, IDLE
 
-      f.sync(@req, "C#{@id}S#{@req}","C#{@id}R#{@req}");
+      # update process time, trace event, complete handshake
+
+      f.sync(@req, "C#{@id}S#{@req}","C#{@id}R#{@req}", caller()[0]);
 
       Csp.yield while (@rxstate != IDLE)
       
@@ -107,13 +127,15 @@ module Csp
       sender = self.sender.last
       temp = @data
       @ack, @rxstate = [@req, f.timestamp + 1].max, FWD
-      f.sync(@ack, "C#{@id}R#{@ack}","C#{@id}S#{@ack}");
 
+      # update process state, trace event, complete handshake
+
+      f.sync(@ack, "C#{@id}R#{@ack}","C#{@id}S#{@ack}",caller[0]);
+      
       Csp.yield while (@txstate == FWD)
       @rxstate = IDLE
 
       #update process state
-
 
       f.state = RUN
 
@@ -250,23 +272,36 @@ module Csp
           raise "unexpected event!"
         end
       end
+
+      # dump state nodes for trace
+
       def pnodes(ofile, indent)
         h = Hash.new()
         @trace.each { |t|
           if h[t[1]].nil?
-            ofile.puts "#{indent}  #{t[1]} [label = \"#{t[0]}\"];"
+            location = t[3] ? " - " + t[3].split(':')[0..1].join(':')  : ""
+            ofile.puts "#{indent}  #{t[1]} [label = \"#{t[0]} #{location}\"];"
             h[t[1]] = 1;
           end
         }
       end
 
-      def ptrans(ofile, indent)
-        @trace.each { |t| ofile.puts "#{indent} #{t[1]} -> #{t[2]};" unless t[2].nil? 
+      # dump transtions for trace
+
+      def ptrans(ofile, indent, last)
+        @trace.each { |t| 
+          ofile.puts "#{indent} #{t[1]} -> #{t[2]};" unless t[2].nil? 
+          unless last.nil? or (last == t[1])
+            ofile.puts "#{indent} #{last} -> #{t[1]};"
+          end
+          last = t[1]
         }
+        last
       end
+        
     end
 
-    def initialize(name, ts,cin,cout,&blk)
+    def initialize(name, ts,cin,cout,srcloc,&blk)
       @timestamp = ts
       @timstart  = ts
       @state = RUN
@@ -279,9 +314,10 @@ module Csp
       super() {
         callcc {|cc|
           # set up initial context
+
           @@root = self if @@root.nil?
           @cstack = [ Context.new(cc, @timestamp) ]
-          @cstack.last.trace.push([@timestamp, "P#{@id}N#{@timestamp}"])
+          @cstack.last.trace.push([@timestamp, "P#{@id}N#{@timestamp}", nil , srcloc])
           @cin.each {|c| 
             event(c.ack, c, RCV_EV) 
             c.receiver.push self 
@@ -316,7 +352,7 @@ module Csp
     def event(ts, obj, tp )
       @cstack.last.event(ts, obj, tp)
       if (tp == PROC_EV)
-        evtrace = [ts,"P#{@id}N#{ts}","P#{obj.id}N#{obj.timstart}"]
+        evtrace = [ts,"P#{@id}N#{ts}","P#{obj.id}N#{obj.timstart}",nil,caller()[2]]
         @cstack.last.trace.push(evtrace)
       end
     end
@@ -324,11 +360,12 @@ module Csp
     def stable(&blk)
       @timestamp += 1
       # create a new context
+      location = caller()[1]
       callcc {|cc| 
         cout = @cstack.last.snd_port
         cin = @cstack.last.rcv_port
         @cstack.push Context.new(cc, @timestamp)
-        @cstack.last.trace.push([@timestamp, "P#{@id}N#{@timestamp}"])
+        @cstack.last.trace.push([@timestamp, "P#{@id}N#{@timestamp}", nil, location])
         cout.each { |c,ts| event(c.req, c, SND_EV)}
         cin.each { |c,ts| event(c.ack, c, RCV_EV)} 
       }
@@ -376,7 +413,7 @@ module Csp
       # erase trace history
       
       ts = @cstack.last.timestamp
-      @cstack.last.trace = [[ts, "P#{@id}N#{ts}"]]
+      @cstack.last.trace = [@cstack.last.trace[0]] #[[ts, "P#{@id}N#{ts}"]]
 
       puts "#{self} exiting backtrack" if Csp.log(1)
       
@@ -435,9 +472,9 @@ module Csp
       end 
     end
 
-    def sync(ts, from, to)
+    def sync(ts, from, to, c)
       @timestamp = ts
-      @cstack.last.trace.push([ts, from, to]);
+      @cstack.last.trace.push([ts, from, to, c]);
     end
 
     def self.processes 
@@ -468,9 +505,19 @@ module Csp
       Channel.new(name, self)
     end
 
-    def ptrans(ofile, indent)
-      @cstack.each { |ctxt| ctxt.ptrans(ofile, indent) }
+    def tick()
+      @timestamp += 1
+      @cstack.last.trace.push([@timestamp, "P#{@id}N#{@timestamp}", nil, caller()[1]]);
     end
+
+    # print transitions from trace
+
+    def ptrans(ofile, indent)
+      last = nil
+      @cstack.each { |ctxt| last = ctxt.ptrans(ofile, indent, last) }
+    end
+
+    # print process graph
 
     def pgraph(ofile)
       def pcluster(ofile, cs, indent)
@@ -517,13 +564,19 @@ module Csp
   end
 
   def Csp.proc(name, cin, cout, &blk)
+    srcloc = blk.source_location[0]  + ":#{blk.source_location[1]}"
     f = CspProc.current
     ts = f.is_a?(CspProc) ? f.timestamp + 1 : 0
-    p = CspProc.new(name, ts,cin,cout) {blk.call}
+    p = CspProc.new(name, ts,cin,cout,srcloc) {blk.call}
     p.resume
     # put proc in parent's context
     f.event(f.timestamp, p, PROC_EV) if f.is_a?(CspProc)
     return p
+  end
+
+  def Csp.tick()
+    f = Csp.current
+    f.tick() if f.is_a?(CspProc)
   end
 
   def Csp.channel(name)
@@ -548,16 +601,21 @@ module Csp
     CspProc.current
   end
 
-  def Csp.pdump(filename, p=nil)
+  def Csp.pdump(p=nil)
     if (p)
       p.pgraph(ofile)
     else
-      ofile = File.open(filename, "w")
-      ofile.puts "strict digraph G {"
-      ofile.puts "  concentrate=true;"
-      CspProc.root.pgraph(ofile)
-      ofile.puts "}"
-      ofile.close
+      filename = Csp.TraceFile()
+      unless filename.nil?
+        ofile = File.open(filename[0], "w")
+        location = caller()[0].split(':')[0..1].join(':')
+        ofile.puts "strict digraph G {"
+        ofile.puts "  concentrate=true;"
+        ofile.puts " gname [shape=plaintext, fontsize=16, label=\"#{filename[1]}:#{location}\"];"
+        CspProc.root.pgraph(ofile)
+        ofile.puts "}"
+        ofile.close
+      end
     end
   end
 end
