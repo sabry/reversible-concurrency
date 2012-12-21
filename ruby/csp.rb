@@ -302,7 +302,6 @@ module Csp
         h = Hash.new()
         @trace.each { |t|
           if h[t[1]].nil?
-#            t[3] = File.basename(t[3])
             location = t[3] ? " - " + t[3].split(':')[0..2].join(':')  : ""
             ofile.puts "#{indent}  #{t[1]} [label = \"#{t[0]} #{location}\"];"
             h[t[1]] = 1;
@@ -396,6 +395,7 @@ module Csp
       blk.call
       # exit choose, destroy context
       oldcontext = @cstack.pop
+      @cstack.last.trace = @cstack.last.trace + oldcontext.trace
     end
 
     def backtrack
@@ -409,10 +409,12 @@ module Csp
 
       raise "No saved context !" if (@cstack.length == 0)
 
-      puts "#{self} backtracking" if Csp.log(1)
 
+      puts "#{self} backtracking from #{@timestamp} to #{@cstack.last.timestamp}" if Csp.log(1)
       @state = BACK
       @timestamp = @cstack.last.timestamp
+
+
 
       #puts "#{@name} children = #{@cstack.last.procs}"
 
@@ -437,8 +439,7 @@ module Csp
       # erase trace history
       
       ts = @cstack.last.timestamp
-      @cstack.last.trace = [@cstack.last.trace[0]] #[[ts, "P#{@id}N#{ts}"]]
-
+      @cstack.last.trace = [@cstack.last.trace[0]] 
       puts "#{self} exiting backtrack" if Csp.log(1)
       
       # call saved continuation
@@ -500,6 +501,7 @@ module Csp
 
     def sync(ts, from, to, c)
       @timestamp = ts
+      puts "push #{ts} #{from} #{to}" if Csp.log(1)
       @cstack.last.trace.push([ts, from, to, c]);
     end
 
@@ -563,7 +565,6 @@ module Csp
         end
       end
 
-        
       pcluster(ofile, Array.new(@cstack), "  ")
       @cstack.each { |c| c.procs.each { |p| p[0].pgraph(ofile) }}
       @cstack.each { |c| c.procs.each { |pc| pc[0].ptrans(ofile,"  ")}}
@@ -636,6 +637,7 @@ module Csp
         p.pgraph(ofile)
       else
         filename = Csp.TraceFile()
+	puts "new trace file #{filename}" if Csp.log(1)
         unless filename.nil?
           ofile = File.open(filename[0], "w")
           location = Csp.Location()
