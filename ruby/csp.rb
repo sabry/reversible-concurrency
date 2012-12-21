@@ -451,6 +451,8 @@ module Csp
       # check all channels in context to see if 
       # reverse is requested
 
+      #  Need to check channels in all contexts ???
+
       cout = @cstack.last.snd_port
       cin = @cstack.last.rcv_port
 
