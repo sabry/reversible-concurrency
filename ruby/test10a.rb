@@ -6,15 +6,16 @@ Csp.Trace(1)
 EM.synchrony do
 
   def p1(c12,c21,cdone)
+    Csp.tick()
     flag = true
     j = -1
     Csp.stable {
       if flag 
         c12.snd 1
-        puts "!! p1 sending 1"
+        puts "!! p1 sending 1 at time #{Csp.time}"
       else 
         c12.snd 2
-        puts "!! p1 sending 2"
+        puts "!! p1 sending 2 at time #{Csp.time}"
       end
       Csp.tick()
       j = c21.rcv
@@ -30,17 +31,21 @@ EM.synchrony do
   end
   
   def p2(c12,c21,cdone)
+    Csp.tick()
     j = c12.rcv
+    puts "p2 receive #{j} at time #{Csp.time}"
     res = -1
     if (j == 1)
       puts "!! p2 received 1"
       puts "!! p2 sending 0"
       c21.snd 0
+      puts "p2 send 0 at time #{Csp.time}"
       res = 0
     else 
       puts "!! p2 received something other than 1"
       puts "!! p2 sending 1"
       c21.snd 1
+      puts "p2 send 1 at time #{Csp.time}"
       res = 10
     end
     cdone.rcv # if I finish I won't be able to backtrack
