@@ -1,5 +1,6 @@
 require "em-synchrony"
 require "continuation"
+require "pathname"
 
 #
 # to do --
@@ -10,6 +11,41 @@ require "continuation"
 #
 
 module Csp
+
+  @@traceno = 0
+  @@tracefile = "csptrace"
+  @@traceon = false
+
+  def self.Location
+    cstack = caller()
+    loc = cstack.index{|x|
+      not x.split(':')[0] == __FILE__
+    }
+    # want file location and method called in csp.rb
+    floc = cstack[loc].split(':')
+    ploc = cstack[loc-1].split(':')
+    floc[2] = ploc[2];
+    loc = floc.join(':')
+    loc = File.basename(floc.join(':'))
+  end
+
+  def self.TraceFile
+
+    if (@@tracefile.nil?)
+      nil
+    else
+      @@traceno += 1
+      [ '%s%03d.dot' % [@@tracefile, @@traceno-1], @@traceno-1]
+    end
+  end
+
+  def self.SetTraceFile(fname)
+    @@tracefile = fname
+  end
+
+  def self.Trace(flag)
+    @@traceon = flag ? true : false
+  end
 
   def Csp.log(ll)
     return false #1 < ll
@@ -36,6 +72,8 @@ module Csp
     IDLE = 0
     FWD  = 1
 
+    @@nextid = 0
+    attr_reader   :id
     attr_reader   :ack
     attr_reader   :req
     attr_reader   :name
@@ -54,6 +92,8 @@ module Csp
       @sender = []
       @receiver = []
       @name = name
+      @id = @@nextid
+      @@nextid += 1
     end
 
     def to_s
@@ -75,13 +115,19 @@ module Csp
       @data, @req, @txstate = d, f.timestamp + 1, FWD
 
       Csp.yield while (@rxstate == IDLE)
+
+      receiver = self.receiver.last
       @req, @txstate = @ack, IDLE
+
+      # update process time, trace event, complete handshake
+
+      f.sync(@req, "C#{@id}S#{@req}","C#{@id}R#{@req}", Csp.Location())
+
 
       Csp.yield while (@rxstate != IDLE)
       
       # update process state
 
-      f.timestamp = @req
       f.state = RUN
 
     end
@@ -97,16 +143,24 @@ module Csp
       f.state = BLOCK
 
       Csp.yield while @txstate == IDLE
+      sender = self.sender.last
       temp = @data
       @ack, @rxstate = [@req, f.timestamp + 1].max, FWD
 
+      # update process state, trace event, complete handshake
+
+
+      
       Csp.yield while (@txstate == FWD)
+
+      f.sync(@ack, "C#{@id}R#{@ack}","C#{@id}S#{@ack}",Csp.Location())
+      Csp.pdump
       @rxstate = IDLE
 
       #update process state
 
-      f.timestamp = @ack
       f.state = RUN
+
 
       # return received value
 
@@ -159,11 +213,6 @@ module Csp
         puts "txrev #{self} #{ts}" if Csp.log(1)
         @rxint = true 
       end
-      # this shouldn't be necessary !
-#      if (@rxstate == FWD) and (@txstate == IDLE)
-#        puts "txrev #{self} #{ts}" if Csp.log(1)
-#        @rxint = true 
-#      end
     end
 
     #
@@ -188,10 +237,14 @@ module Csp
   class CspProc < Fiber
 
     @@processes = 0
+    @@nextid = 0
+    @@root = nil
 
     attr_accessor :state
     attr_reader :name
     attr_accessor :timestamp
+    attr_reader :id
+    attr_reader :timstart
 
     #
     # process contexts -- includes
@@ -211,6 +264,7 @@ module Csp
       attr_reader   :rcv_port
       attr_accessor :chans
       attr_accessor :procs
+      attr_accessor :trace
       attr_reader   :cin
       attr_reader   :cout
 
@@ -221,6 +275,7 @@ module Csp
         @snd_port   = Hash.new
         @procs      = []
         @chans      = []
+        @trace      = []
         @name = "default"
       end
 
@@ -231,7 +286,7 @@ module Csp
         when RCV_EV
           @rcv_port[obj]  = ts
         when PROC_EV
-          @procs.push obj
+          @procs.push [obj,ts]
         when CHAN_EV
           @chans.push obj
           obj.sender.push self
@@ -240,19 +295,52 @@ module Csp
           raise "unexpected event!"
         end
       end
+
+      # dump state nodes for trace
+
+      def pnodes(ofile, indent)
+        h = Hash.new()
+        @trace.each { |t|
+          if h[t[1]].nil?
+            location = t[3] ? " - " + t[3].split(':')[0..2].join(':')  : ""
+            ofile.puts "#{indent}  #{t[1]} [label = \"#{t[0]} #{location}\"];"
+            h[t[1]] = 1;
+          end
+        }
+      end
+
+      # dump transtions for trace
+
+      def ptrans(ofile, indent, last)
+        @trace.each { |t| 
+          ofile.puts "#{indent} #{t[1]} -> #{t[2]};" unless t[2].nil? 
+          unless last.nil? or (last == t[1])
+            ofile.puts "#{indent} #{last} -> #{t[1]};"
+          end
+          last = t[1]
+        }
+        last
+      end
+        
     end
 
-    def initialize(name, ts,cin,cout,&blk)
+    def initialize(name, ts,cin,cout,srcloc,&blk)
       @timestamp = ts
+      @timstart  = ts
       @state = RUN
       @name = name
       @cin = cin
       @cout = cout
+      @id = @@nextid
+      @@nextid += 1
       
       super() {
         callcc {|cc|
           # set up initial context
+
+          @@root = self if @@root.nil?
           @cstack = [ Context.new(cc, @timestamp) ]
+          @cstack.last.trace.push([@timestamp, "P#{@id}N#{@timestamp}", nil , srcloc])
           @cin.each {|c| 
             event(c.ack, c, RCV_EV) 
             c.receiver.push self 
@@ -284,23 +372,30 @@ module Csp
       "proc #{@name} state=#{@state} time=#{@timestamp}"
     end
 
-    def event(ts, chan, tp )
-      @cstack.last.event(ts, chan, tp)
+    def event(ts, obj, tp )
+      @cstack.last.event(ts, obj, tp)
+      if (tp == PROC_EV)
+        evtrace = [ts,"P#{@id}N#{ts}","P#{obj.id}N#{obj.timstart}",nil,Csp.Location()]
+        @cstack.last.trace.push(evtrace)
+      end
     end
 
     def stable(&blk)
       @timestamp += 1
       # create a new context
+      location = Csp.Location()
       callcc {|cc| 
         cout = @cstack.last.snd_port
         cin = @cstack.last.rcv_port
         @cstack.push Context.new(cc, @timestamp)
+        @cstack.last.trace.push([@timestamp, "P#{@id}N#{@timestamp}", nil, location])
         cout.each { |c,ts| event(c.req, c, SND_EV)}
         cin.each { |c,ts| event(c.ack, c, RCV_EV)} 
       }
       blk.call
       # exit choose, destroy context
       oldcontext = @cstack.pop
+      @cstack.last.trace = @cstack.last.trace + oldcontext.trace
     end
 
     def backtrack
@@ -314,18 +409,21 @@ module Csp
 
       raise "No saved context !" if (@cstack.length == 0)
 
-      puts "#{self} backtracking" if Csp.log(1)
 
+      puts "#{self} backtracking from #{@timestamp} to #{@cstack.last.timestamp}" if Csp.log(1)
       @state = BACK
       @timestamp = @cstack.last.timestamp
+
+
 
       #puts "#{@name} children = #{@cstack.last.procs}"
 
       # kill all our children
       
-      @cstack.last.procs.each {|p| p.kill unless p.state == DEFUNCT}
-      @cstack.last.procs.each {|p| Csp.yield unless p.state == DEFUNCT}
+      @cstack.last.procs.each {|p| p[0].kill unless p[0].state == DEFUNCT}
+      @cstack.last.procs.each {|p| Csp.yield unless p[0].state == DEFUNCT}
       @cstack.last.procs = []
+
 
       # release all channels created
 
@@ -338,6 +436,10 @@ module Csp
         Csp.yield 
       end
 
+      # erase trace history
+      
+      ts = @cstack.last.timestamp
+      @cstack.last.trace = [@cstack.last.trace[0]] 
       puts "#{self} exiting backtrack" if Csp.log(1)
       
       # call saved continuation
@@ -349,6 +451,8 @@ module Csp
 
       # check all channels in context to see if 
       # reverse is requested
+
+      #  Need to check channels in all contexts ???
 
       cout = @cstack.last.snd_port
       cin = @cstack.last.rcv_port
@@ -395,8 +499,18 @@ module Csp
       end 
     end
 
+    def sync(ts, from, to, c)
+      @timestamp = ts
+      puts "push #{ts} #{from} #{to}" if Csp.log(1)
+      @cstack.last.trace.push([ts, from, to, c]);
+    end
+
     def self.processes 
       @@processes 
+    end
+
+    def self.root
+      @@root
     end
     
     def yield
@@ -409,14 +523,52 @@ module Csp
     def kill
       #puts "#{@name} being killed"
       while oldcontext = @cstack.pop
-        oldcontext.procs.each {|p| p.kill if p.state != DEFUNCT }
-        oldcontext.procs.each {|p| yield if p.state != DEFUNCT  }
+        oldcontext.procs.each {|p| p[0].kill if p[0].state != DEFUNCT }
+        oldcontext.procs.each {|p| yield if p[0].state != DEFUNCT  }
       end
       cleanup
     end
 
     def channel(name)
       Channel.new(name, self)
+    end
+
+    def tick()
+      @timestamp += 1
+      @cstack.last.trace.push([@timestamp, "P#{@id}N#{@timestamp}", nil, Csp.Location()]) 
+      Csp.pdump
+    end
+
+    # print transitions from trace
+
+    def ptrans(ofile, indent)
+      last = nil
+      @cstack.each { |ctxt| last = ctxt.ptrans(ofile, indent, last) }
+    end
+
+    # print process graph
+
+    def pgraph(ofile)
+      def pcluster(ofile, cs, indent)
+        unless cs.empty?
+          statename =  ["kill", "DEFUNCT", "RUN", "BLOCK", "BACK"][@state + 2]
+          ctxt = cs.shift
+          ts = ctxt.timestamp
+          nm =  (ts == @timstart) ? "#{@name},#{ts},#{statename}" : "#{ts}"
+          ofile.puts "#{indent}subgraph cluster_p#{@id}_#{ts} {"
+          ofile.puts "#{indent}  label = \"#{nm}\";"
+          ofile.puts "#{indent}  labeljust = \"right\";"
+          ofile.puts "#{indent}  color = blue"
+          pcluster(ofile, cs, "#{indent}  ")
+          ctxt.pnodes(ofile, indent);
+          ofile.puts "#{indent} }"
+        end
+      end
+
+      pcluster(ofile, Array.new(@cstack), "  ")
+      @cstack.each { |c| c.procs.each { |p| p[0].pgraph(ofile) }}
+      @cstack.each { |c| c.procs.each { |pc| pc[0].ptrans(ofile,"  ")}}
+      ptrans(ofile, "  ");
     end
   end
 
@@ -441,13 +593,20 @@ module Csp
   end
 
   def Csp.proc(name, cin, cout, &blk)
+    srcloc = blk.source_location[0]  + ":#{blk.source_location[1]}"
     f = CspProc.current
     ts = f.is_a?(CspProc) ? f.timestamp + 1 : 0
-    p = CspProc.new(name, ts,cin,cout) {blk.call}
+    p = CspProc.new(name, ts,cin,cout,srcloc) {blk.call}
     p.resume
     # put proc in parent's context
     f.event(f.timestamp, p, PROC_EV) if f.is_a?(CspProc)
+    Csp.pdump
     return p
+  end
+
+  def Csp.tick()
+    f = Csp.current
+    f.tick() if f.is_a?(CspProc)
   end
 
   def Csp.channel(name)
@@ -470,5 +629,31 @@ module Csp
 
   def Csp.current
     CspProc.current
+  end
+
+  def Csp.pdump(p=nil)
+    if @@traceon
+      if (p)
+        p.pgraph(ofile)
+      else
+        filename = Csp.TraceFile()
+	puts "new trace file #{filename}" if Csp.log(1)
+        unless filename.nil?
+          ofile = File.open(filename[0], "w")
+          location = Csp.Location()
+          ofile.puts "strict digraph G {"
+          ofile.puts "  concentrate=true;"
+          ofile.puts "  page=\"8.5,11\";"
+          ofile.puts "  size=\"8,10\";"
+          ofile.puts "  labelloc=\"top\";"
+          ofile.puts "  label=\"#{filename[0]}\";"
+          ofile.puts "  orientation=\"landscape\";"
+          ofile.puts "  fontsize=\"10\";"
+          CspProc.root.pgraph(ofile)
+          ofile.puts "}"
+          ofile.close
+        end
+      end
+    end
   end
 end
