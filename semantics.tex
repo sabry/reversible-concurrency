@@ -26,24 +26,29 @@ $\ell$.
 
 \paragraph*{Time.} Each process and each channel maintain a \emph{virtual
   time} which is an indication of how far they have progressed in the
-evaluation. If process $n$ is at virtual $t$, this is indicated by $n@t$. The
-virtual times evolve independently and may be inconsistent globally. However
-whenever a communication event happens, the virtual times of all involved
-parties (the sender process, the receiver process, and the communication
-channel) are all synchronized and brought to a consistent state.
+evaluation. If process $n$ is at virtual time $t$, this is indicated by
+$n@t$. The virtual times evolve independently and may be inconsistent
+globally. However whenever a communication event happens, the virtual times
+of all involved parties (the sender process, the receiver process, and the
+communication channel) are all synchronized and brought to a consistent
+state.
 
 \paragraph*{Channels.} Processes communicate via named channels. Each channel
-is associated with exactly two processes: a sender and a receiver. A channel
-maintains a flag indicating if both attached processes are going forward
-(flag is $F$) or if at least one of them has backtracked (flag is $B$). A
-channel also maintains a virtual time which roughly corresponds to the time
-of the latest communication on that channel. A process $n_1$ whose virtual
-time is $t_1$ can only send or receive on a channel with virtual time $t_c$
-if $t_1 \geq t_c$ and the channel flag is $F$. If the channel flag is $B$,
-this means that the process at the other end has backtracked and hence that
-process $n$ should backtrack to a time $\leq t_c$. It should never be the
-case that a channel with flag $F$ has a time ahead of its associated
-processes. The current timestamps on channels are maintained in a
+$\ell$ is associated with exactly two processes: a sender $s(\ell)$ and a
+receiver $r(\ell)$. A channel maintains a flag indicating whether both
+attached processes are going forward (flag is $F$) or if at least one of them
+is backtracking (flag is $B$). A channel also maintains a virtual time which
+roughly corresponds to the time of the latest ``real'' communication on that
+channel, i.e., communication occurring with neither party backtrackig. It
+should never be the case that a channel with flag $F$ has a time ahead of its
+associated processes because the times are synchronized at each communication
+and the associated processes can only increase their local times after the
+communication. A process~$n@t$ can only send or receive on a channel whose
+channel flag is $F$, which implies that the channel's virtual time $t_c$ is
+such that $t_1 \geq t_c$. If process~$n@t$ wants to communicate on a channel
+whose flag is $B$, this means that the partner process at the other end is
+backtracking and hence that process $n$ should also backtrack to at least
+some time $\leq t_c$. The current timestamps on channels are maintained in a
 \emph{global} map $\Xi$. A process who id is $n$ can however only ``see'' the
 part of the map that refers to its channels: we refer to this part as
 $\Xi\downarrow n$.
@@ -65,13 +70,13 @@ process needs to be saved but we save the entire channel map for simplicity.)
 \paragraph*{Grammar.}
 
 \[\begin{array}{lrcl}
-(\textit{process names}) & n \\
-(\textit{channel names}) & \ell \\
-(\textit{time stamps}) & t \\
+(\textit{process names}) & n, \ldots \\
+(\textit{channel names}) & \ell, \ldots \\
+(\textit{time stamps}) & t, \ldots \\
 \\
 (\textit{channel direction}) & d &::=& F \alt B \\
 (\textit{channel maps}) & \Xi &=& \ell \mapsto (t,d,n_1,n_2) \\
-(\textit{context stacks}) & \Gamma &=& (E,t,\Xi),\ldots,(E',t',\Xi') \\
+(\textit{context stacks}) & \Gamma &=& \bullet \alt \Gamma,(E,t,\Xi) \\
 \\
 (\textit{processes}) & p &::=& (\parc{p_1}{p_2}) \alt \proc{n}{\Gamma}{e}{t} \\
 \\
@@ -87,8 +92,16 @@ process needs to be saved but we save the entire channel map for simplicity.)
   &&\alt& \stable{E} \alt \stableu{E} \alt \backtrack{E}
 \end{array}\]
 
+We use $e_1;e_2$ as syntactic sugar for $(\lambda \_.e_2)~e_1$ to indicate
+sequencing.
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Semantics} 
+
+Initially, every process starts with virtual time 0, an empty stack of
+contexts, and an expression to evaluate, i.e., process $n_i$ with code $e_i$
+starts in the configuration $\proc{n_i}{\bullet}{\Box[e_i]}{0}$. The rules
+for evolving the collection of processes are as follows:
 
 \begin{itemize}
 \item The first rule just applies a local evaluation rule to one of the
@@ -101,12 +114,11 @@ process needs to be saved but we save the entire channel map for simplicity.)
   \Xi,\parc{p}{\proc{n}{\Gamma}{E[e[v/x]]}{t}}
 \end{array}\]
 
-\item This next rule says that if we have a channel $\ell$ and two processes
-  with timestamps $t_1$ and $t_2$ who wish to communicate using this channel,
-  the communication only happens if both process timestamps are greater than
-  or equal to the channel timestamp and the channel has a flag $F$. After the
-  communication, all three timestamps are updated to some number that is
-  greater than or equal to their maximum:
+\item This next rule says that if we have a channel $\ell$ with flag $F$ and
+  two processes who wish to communicate using this channel, the
+  synchronization happens as usual. After the communication, all three
+  timestamps are updated to some number that is greater than or equal to
+  their maximum:
 \[\begin{array}{l}
   \Xi_1,\parc{p}
   {\parc{\proc{n_1}{\Gamma_1}{E_1[\send{\ell}{v}]}{t_1}}
@@ -115,9 +127,12 @@ process needs to be saved but we save the entire channel map for simplicity.)
   \Xi_2,\parc{p}{\parc{\proc{n_1}{\Gamma_1}{E_1[()]}{t}}
     {\proc{n_2}{\Gamma_2}{E_2[v]}{t}}}
 \end{array}\]
-if $(\ell,(t_{c},F,n_1,n_2)) \in \Xi_1$, the original channel map, and $t_1,t_2
-\geq t_c$. The entry for $\ell$ in the resulting channel map 
-$\Xi_2$ is $(t,F,n_1,n_2)$ for some $t \geq t_1, t_2, t_c$.
+if $(\ell,(t_{c},F,n_1,n_2)) \in \Xi_1$, the original channel map.  The entry
+for $\ell$ in the resulting channel map $\Xi_2$ is $(t,F,n_1,n_2)$ for some
+$t \geq t_1, t_2, t_c$. In the rule, the receiver non-deterministically
+``chose'' to communicate on channel $\ell$. If another process $n_1'$ was
+ready to communicate on channel $\ell'$ (and channel's $\ell'$ flag was $F$),
+the receiver could have synchronized wit $n_1'$ using the same rule.
 
 \item The next two rules deal with stable regions. When a new stable region
   is encountered, the evaluation increments the timestamp and saves a new
@@ -135,24 +150,28 @@ region terminates with a value, we simply pop the context:
   \Xi,\parc{p}{\proc{n}{\Gamma}{E[v]}{t}} 
 \end{array}\]
 
-\item The next rule shows what happens when we backtrack. In that case, we
-  recover the saved state of the channels and resume execution from the saved
-  time with the saved continuation:
+\item So far, none of the rules caused any virtual time to decrease. When a
+  process $n$ backtracks, however, its virtual time is reinstated to a
+  previously saved time. In addition, we recover the saved state of the
+  channels and update each channel involving $n$ to have a flag $B$ to
+  indicate that one of its communicating partners is backtracking. We then
+  resume execution with the saved continuation:
 \[\begin{array}{rcl}
   \Xi,\parc{p}{\proc{n}{\Gamma,(E',t',\Xi')}{E[\backtrack{v}]}{t}} 
   &\mapsto& 
   (\Xi\uplus(\Xi'\downarrow n)^\dagger),\parc{p}{\proc{n}{\Gamma}{E'[v]}{t'}} 
 \end{array}\]
-In this rule, it is important to realize that process $n$ only updates the 
-part of the global map $\Xi$ that involves $n$. Otherwise, the progress 
-by other unrelated channels would be lost. The $\dagger$ indicates that channels 
-flagged with $B$ need to be updated to $F$ if the new time $t'$ is less than their
-virtual times. In other words, if process $n$ has backtracked as far as one of
-its communicating partners, the corresponding channel becomes available again 
-for communication. 
+In this rule, it is important to realize that process $n$ only updates the
+part of the global map $\Xi$ that involves $n$. Otherwise, the progress by
+other unrelated channels would be lost. The $\dagger$ operation updates the
+flag associated with each of the channels involving $n$, i.e., each of the
+channels in $\Xi' \downarrow n$ to $B$.
 
-\item The next two rules deal with the situation in which one of the
-  processes has backtracked but its communication partner has not. In this
+\item The next set of rules deal with the situation in which one of the
+  processes has backtracked but its communication partner has not. In more
+  detail, when the common channel has flag $B$, it is either the case that
+  someone has to backtrack further or that the two involved processes have
+  backtracked enough and the channel's flag can be updated to $F$. In this
   first rule, the sender needs to backtrack:
 \[\begin{array}{l}
   \Xi,
@@ -160,12 +179,24 @@ for communication.
   \Xi,
   \parc{p}{\proc{n_1}{\Gamma}{E[\backtrack{()}; \send{\ell}{v}]}{t_1}}
 \end{array}\]
-if $(\ell,(t_c,B,n_1,n_2)) \in \Xi_1$, the original channel map indicating
-that $n_2$ has backtracked to a time consistent with $t_c$ and hence that
-$n_1$ should do the same. We achieve this by executing $\backtrack{()}$ which
-moves to the most recent saved context and attempts to re-execute the
-communication.  If that fails, this same rule applies and we backtrack again.
-There is a symmetric rule for receivers.
+if $(\ell,(t_c,B,n_1,n_2)) \in \Xi_1$ and $t_c < t_1$. This condition
+indicates that $n_2$ has backtracked to a time consistent with $t_c$ and
+hence that $n_1$ is still in the (inconsistent) future and hence should do
+the same. We achieve this by executing $\backtrack{()}$ which moves to the
+most recent saved context and attempts to re-execute the communication.  If
+that fails, this same rule applies and we backtrack again.  There is a
+symmetric rule for receivers.
+
+Eventually, the process backtracks to a time $t_1$ such that $t_c \geq t_1$,
+at which we can revert the channel to the flag $F$:
+\[\begin{array}{l}
+  \Xi_1,
+  \parc{p}{\proc{n_1}{\Gamma}{E[\send{\ell}{v}]}{t_1}} \mapsto \\
+  \Xi_2,
+  \parc{p}{\proc{n_1}{\Gamma}{E[\send{\ell}{v}]}{t_1}} 
+\end{array}\]
+if $(\ell,(t_c,B,n_1,n_2)) \in \Xi_1$ and $t_c \geq t_1$ and channel $\ell$'s
+information in $\Xi_2$ is updated to $t_c,F,n_1,n_2)$.
 
 \end{itemize}
 
