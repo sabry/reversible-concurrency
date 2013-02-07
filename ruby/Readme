@@ -1,5 +1,0 @@
-test10a.rb dumps graphs:
-
-ruby test10a.rb
-for file in test10a*.dot; do dot -Tps $file > $file.ps; done
-gs -q -dNOPAUSE -dBATCH -dSAFER -sDEVICE=pdfwrite -sOutputFile=xx.pdf *.dot.ps
