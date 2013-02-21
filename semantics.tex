@@ -9,12 +9,15 @@
 \begin{document}
 \maketitle
 
+\newcommand{\todo}[1]{\fbox{#1}}
+
 \newcommand{\alt}{~|~}
 \newcommand{\parc}[2]{#1 \,\|\, #2}
 \newcommand{\send}[2]{\texttt{send}~#1~#2}
 \newcommand{\stable}[1]{\texttt{stable}~#1}
 \newcommand{\stableu}[1]{\underline{\texttt{stable}}~#1}
 \newcommand{\backtrack}[1]{\texttt{backtrack}~#1}
+\newcommand{\abacktrack}{\texttt{backtrack}\_}
 \newcommand{\recv}[4]{\texttt{recv}~(#1.#2) \talloblong (#3.#4)}
 \newcommand{\proc}[5]{\langle #1@#5:~ #3, #2,#4 \rangle}
 
@@ -36,31 +39,36 @@ $\ell$ is associated with exactly two processes: a sender and a receiver.
 Each of the sender and receiver maintains a \emph{local view} of the
 channel's state as follows. The sender maintains a virtual time associated
 with its latest request to communicate on the channel and a flag indicating
-whether it the channel is in the normal (forward) state (flag is $F$) or
-whether the communication on the channel needs to be undone because of
-backtracking (flag is $B$). The receiver maintains two similar variables: a
-virtual time indicating the latest acknowledgment it communicated on the
-channel and a flag (whose value is also $F$ or $B$) indicating whether the
-receiver views that the channel in the normal forward state or the
-backtracking state. The views of the sender and receiver may be inconsistent
-at times but are synchronized at communication times. The main invariant is
-that when both views of the channel indicate the channel state to be $F$,
-then the two virtual times associated with the sender and receiver views
-coincide. The channel information is maintained in a \emph{local} map $\Xi$
+whether it views the channel as being in the normal (forward) state (flag is
+$F$) or in a backtracking state (flag is $B$). The receiver maintains two
+similar variables: a virtual time indicating the latest acknowledgment it
+communicated on the channel and a flag (whose value is also $F$ or $B$).  The
+views of the sender and receiver may be inconsistent at times but are
+synchronized at communication times. The main invariant is that when both
+views of the channel indicate the channel state to be $F$, then the two
+virtual channel times associated with the sender and receiver views coincide
+and are less than the two local virtual times of the sender and receiever
+processes. The channel information is maintained in a \emph{local} map $\Xi$
 associated with each process.
 
 \paragraph*{Communication Model.} We focus on \emph{synchronous}
 channel-based communication. The model supports \emph{choice}: the expression
 $\recv{x_1}{\ell_1}{x_2}{\ell_2}$ can receive a message on either channel
 $\ell_1$ or $\ell_2$. If both choices are offered, the evaluation of the
-expression is permitted to choose which one to accept. 
+expression is permitted to choose which one to accept. Extending this model
+to handle any finite number of choices is straightforward but complicates the
+presentation of the semantics. The accompanying implementation allows a list
+of choices.
 
 \paragraph*{Processes.} A process computes forward and backwards sending and
 receiving messages. To enable distributed backtracking, each process maintain
 a virtual time $t$, a channel map $\Xi$, and a stack $\Gamma$ of
 contexts. Each context includes a conventional continuation (a control point
-and an environment), a time stamp, and a channel map describing the state of
-the communication channels at the time of the checkpoint. 
+and an environment), a value saved to resume asynchronous backtracks forced
+by communicating neighbors, a time stamp, and a channel map describing the
+state of the communication channels at the time of the checkpoint. A process
+state is \emph{stable} if the process virtual time is greater than or equal
+to the times of the channels in its context and channel map.
 
 \paragraph*{Grammar.}
 
@@ -72,7 +80,7 @@ the communication channels at the time of the checkpoint.
 (\textit{channel direction}) & d &::=& F \alt B \\
 (\textit{channel port}) & sr &::=& \textbf{s} \alt \textbf{r} \\
 (\textit{channel maps}) & \Xi &=& \ell \mapsto (sr,t,d,n) \\
-(\textit{context stacks}) & \Gamma &=& \bullet \alt \Gamma,(E,t,\Xi) \\
+(\textit{context stacks}) & \Gamma &=& \bullet \alt \Gamma,(E,v,t,\Xi) \\
 \\
 (\textit{processes}) & p &::=& (\parc{p_1}{p_2}) \alt \proc{n}{\Gamma}{\Xi}{e}{t} \\
 \\
@@ -80,7 +88,7 @@ the communication channels at the time of the checkpoint.
 (\textit{expressions}) & e &::=& () \alt \ell \alt x \alt \lambda x.e 
   \alt e_1e_2 \\
   &&\alt& \send{e_1}{e_2} \alt \recv{x_1}{e_1}{x_2}{e_2} \\
-  &&\alt& \stable{e} \alt \stableu{e} \alt \backtrack{e} \\
+  &&\alt& \stable{e} \alt \stableu{e} \alt \backtrack{e} \alt \abacktrack \\
 \\
 (\textit{evaluation contexts}) & E &::=& \Box \alt E~e \alt v~E \alt 
   \send{E}{e} \alt \send{\ell}{E} \\
@@ -139,9 +147,9 @@ The preconditions for this rule are:
   $(\textbf{r},t_r,F,n_1)$, i.e., the map correctly identifies $n_1$ as the
   sending process, and records that the channel direction is $F$, and has
   some virtual time $t_r$; and
-\item the sender's virtual time is greater than the channel's virtual time in
-  the sender's map, i.e., $t_1 > t_s$, and similarly for the receiver's
-  virtual time, i.e., $t_2 > t_r$.
+\item the sender's virtual time is greater than or equal to the channel's
+  virtual time in the sender's map, i.e., $t_1 \geq t_s$, and similarly for
+  the receiver's virtual time, i.e., $t_2 \geq t_r$.
 \end{itemize}
 If these conditions are satisfied, the communication happens, and the virtual
 times for the sender, receiver, and the channel times in each local map are
@@ -163,10 +171,10 @@ using the same rule.
   \parc{p}{\proc{n}{\Gamma}{\Xi}{E[(\stable{(\lambda x.e)})~v]}{t}} &\mapsto&
   \parc{p}{\proc{n}{\Gamma'}{\Xi}{E[\stableu{e[v/x]}]}{(t+1)}} 
 \end{array}\]
-where $\Gamma' = \Gamma,(E,(t+1),\Xi)$. When the body of a stable 
+where $\Gamma' = \Gamma,(E,v,(t+1),\Xi)$. When the body of a stable 
 region terminates with a value, we simply pop the context:
 \[\begin{array}{rcl}
-  \parc{p}{\proc{n}{(\Gamma,(E,t',\Xi'))}{\Xi}{E[\stableu{v}]}{t}} 
+  \parc{p}{\proc{n}{(\Gamma,(E,v',t',\Xi'))}{\Xi}{E[\stableu{v}]}{t}} 
   &\mapsto& 
   \parc{p}{\proc{n}{\Gamma}{\Xi}{E[v]}{t}} 
 \end{array}\]
@@ -174,36 +182,47 @@ region terminates with a value, we simply pop the context:
 \item So far, none of the rules caused any virtual time to decrease. When a
   process $n$ backtracks, however, its virtual time is reinstated to a
   previously saved time. In addition, we recover the saved state of the
-  channels and update each channel to have a flag $B$ to indicate the start
-  of a backtracking process for communication events on that channel.  We
-  then resume execution with the saved continuation:
+  channels updating the channels that need to backtrack to have a flag $B$. A
+  channel needs to backtrack if it was used for communication since it was
+  last saved, i.e., if its saved time is less than its current time. We then
+  resume execution with the saved continuation:
 \[\begin{array}{rcl}
-  \parc{p}{\proc{n}{(\Gamma,(E',t',\Xi'))}{\Xi}{E[\backtrack{v}]}{t}} 
+  \parc{p}{\proc{n}{(\Gamma,(E',v',t',\Xi'))}{\Xi}{E[\backtrack{v}]}{t}} 
   &\mapsto& 
-  \parc{p}{\proc{n}{\Gamma}{\overline{\Xi'}}{E'[v]}{t'}} 
+  \parc{p}{\proc{n}{\Gamma}{\overline{\Xi'}}{E'[v]}{t'}} \\
+\\
+  \parc{p}{\proc{n}{(\Gamma,(E',v',t',\Xi'))}{\Xi}{E[\abacktrack]}{t}} 
+  &\mapsto& 
+  \parc{p}{\proc{n}{\Gamma}{\overline{\Xi'}}{E'[v']}{t'}} 
 \end{array}\]
-where $\overline{\Xi'}$ denotes the channel map $\Xi$ with each entry updated
-to have direction $B$.
+where $\underline{\Xi'}$ denotes the channel map $\Xi$ with each entry that
+needs to be backtrack updated to have direction $B$. An entry $\ell \mapsto
+(sr,t,d,n)$ in $\Xi'$ needs to backtrack if its time component $t$ is less
+than the corresponding time $t'$ in the current map entry $\Xi(\ell) =
+(sr',t',d',n')$.
 
-\item The next set of rules deal with the situation in which one of the
+\item The next rule deals with the situation in which one of the
   processes has backtracked but its communication partner has not. In more
-  detail, when the common channel has flag $B$, it is either the case that
-  someone has to backtrack further or that the two involved processes have
-  backtracked enough and the channel's flag can be updated to $F$. In this
-  first rule, the sender needs to backtrack:
-\[\begin{array}{l}
-  \Xi,
-  \parc{p}{\proc{n_1}{\Gamma}{\Xi}{E[\send{\ell}{v}]}{t_1}} \mapsto \\
-  \Xi,
-  \parc{p}{\proc{n_1}{\Gamma}{\Xi}{E[\backtrack{()}; \send{\ell}{v}]}{t_1}}
+  detail, if a channel $\ell$ is such that one of its attached processes
+  views it in the $F$ direction and the other attached process views it in
+  the $B$ direction, the former needs to backtrack to bring the channel to a
+  consistent state:
+\[\begin{array}{rcl}
+\parc{p}
+  {\parc{\proc{n_1}{\Gamma_1}{\Xi_1}{e_1}{t_1}}
+  {\proc{n_2}{\Gamma_2}{\Xi_2}{e_2}{t_2}}} &\mapsto& 
+\parc{p}
+  {\parc{\proc{n_1}{\Gamma_1}{\Xi_1}{e_1}{t_1}}
+  {\proc{n_2}{\Gamma_2}{\Xi_2}{\abacktrack}{t_2}}} 
 \end{array}\]
+
 if $(\ell,(t_c,B,n_1,n_2)) \in \Xi_1$ and $t_c < t_1$. This condition
 indicates that $n_2$ has backtracked to a time consistent with $t_c$ and
 hence that $n_1$ is still in the (inconsistent) future and hence should do
-the same. We achieve this by executing $\backtrack{()}$ which moves to the
-most recent saved context and attempts to re-execute the communication.  If
-that fails, this same rule applies and we backtrack again.  There is a
-symmetric rule for receivers.
+the same. We achieve this by executing $\abacktrack$ which moves to the most
+recent saved context and attempts to re-execute the communication.  If that
+fails, this same rule applies and we backtrack again.  There is a symmetric
+rule for receivers.
 
 Eventually, the process backtracks to a time $t_1$ such that $t_c \geq t_1$,
 at which we can revert the channel to the flag $F$:
@@ -215,6 +234,11 @@ at which we can revert the channel to the flag $F$:
 \end{array}\]
 if $(\ell,(t_c,B,n_1,n_2)) \in \Xi_1$ and $t_c \geq t_1$ and channel $\ell$'s
 information in $\Xi_2$ is updated to $t_c,F,n_1,n_2)$.
+
+Fold this rule in the communication rule: add side conditions to
+communication rule if channels are B and channel time is greater than of
+equal to process time; in that case we do communication and update channels
+to have flag F.
 
 \end{itemize}
 
