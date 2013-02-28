@@ -47,9 +47,9 @@ views of the sender and receiver may be inconsistent at times but are
 synchronized at communication times. The main invariant is that when both
 views of the channel indicate the channel state to be $F$, then the two
 virtual channel times associated with the sender and receiver views coincide
-and are less than the two local virtual times of the sender and receiever
-processes. The channel information is maintained in a \emph{local} map $\Xi$
-associated with each process.
+and are less than or equal to the two local virtual times of the sender and
+receiver processes. The channel information is maintained in a \emph{local}
+map $\Xi$ associated with each process.
 
 \paragraph*{Communication Model.} We focus on \emph{synchronous}
 channel-based communication. The model supports \emph{choice}: the expression
@@ -160,7 +160,7 @@ resulting local map $\Xi_2'$ associates $\ell$ with
 $(\textbf{r},t,F,n_1)$. In the rule, the receiver non-deterministically
 ``chose'' to communicate on channel $\ell$. If another process $n_1'$ was
 ready to communicate on channel $\ell'$ (and the preconditions were satisfied
-for that communication), the receiver could have synchronized wit $n_1'$
+for that communication), the receiver could have synchronized with $n_1'$
 using the same rule.
 
 \item The next two rules deal with stable regions. When a new stable region
@@ -189,11 +189,11 @@ region terminates with a value, we simply pop the context:
 \[\begin{array}{rcl}
   \parc{p}{\proc{n}{(\Gamma,(E',v',t',\Xi'))}{\Xi}{E[\backtrack{v}]}{t}} 
   &\mapsto& 
-  \parc{p}{\proc{n}{\Gamma}{\overline{\Xi'}}{E'[v]}{t'}} \\
+  \parc{p}{\proc{n}{\Gamma}{\underline{\Xi'}}{E'[v]}{t'}} \\
 \\
   \parc{p}{\proc{n}{(\Gamma,(E',v',t',\Xi'))}{\Xi}{E[\abacktrack]}{t}} 
   &\mapsto& 
-  \parc{p}{\proc{n}{\Gamma}{\overline{\Xi'}}{E'[v']}{t'}} 
+  \parc{p}{\proc{n}{\Gamma}{\underline{\Xi'}}{E'[v']}{t'}} 
 \end{array}\]
 where $\underline{\Xi'}$ denotes the channel map $\Xi$ with each entry that
 needs to be backtrack updated to have direction $B$. An entry $\ell \mapsto
@@ -227,13 +227,11 @@ rule for receivers.
 Eventually, the process backtracks to a time $t_1$ such that $t_c \geq t_1$,
 at which we can revert the channel to the flag $F$:
 \[\begin{array}{l}
-  \Xi_1,
-  \parc{p}{\proc{n_1}{\Gamma}{\Xi}{E[\send{\ell}{v}]}{t_1}} \mapsto \\
-  \Xi_2,
-  \parc{p}{\proc{n_1}{\Gamma}{\Xi}{E[\send{\ell}{v}]}{t_1}} 
+  \parc{p}{\proc{n_1}{\Gamma}{\Xi_1}{E[\send{\ell}{v}]}{t_1}} \mapsto \\
+  \parc{p}{\proc{n_1}{\Gamma}{\Xi_2}{E[\send{\ell}{v}]}{t_1}} 
 \end{array}\]
 if $(\ell,(t_c,B,n_1,n_2)) \in \Xi_1$ and $t_c \geq t_1$ and channel $\ell$'s
-information in $\Xi_2$ is updated to $t_c,F,n_1,n_2)$.
+information in $\Xi_2$ is updated to $(t_c,F,n_1,n_2)$.
 
 Fold this rule in the communication rule: add side conditions to
 communication rule if channels are B and channel time is greater than of
