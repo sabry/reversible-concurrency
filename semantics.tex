@@ -18,7 +18,7 @@
 \newcommand{\stableu}[1]{\underline{\texttt{stable}}~#1}
 \newcommand{\backtrack}[1]{\texttt{backtrack}~#1}
 \newcommand{\abacktrack}{\texttt{backtrack}\_}
-\newcommand{\recv}[4]{\texttt{recv}~(#1.#2) \talloblong (#3.#4)}
+\newcommand{\recv}[6]{\texttt{recv}~(#1.#2~#5) \talloblong (#3.#4~#6)}
 \newcommand{\proc}[5]{\langle #1@#5:~ #3, #2,#4 \rangle}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -53,12 +53,13 @@ map $\Xi$ associated with each process.
 
 \paragraph*{Communication Model.} We focus on \emph{synchronous}
 channel-based communication. The model supports \emph{choice}: the expression
-$\recv{x_1}{\ell_1}{x_2}{\ell_2}$ can receive a message on either channel
-$\ell_1$ or $\ell_2$. If both choices are offered, the evaluation of the
-expression is permitted to choose which one to accept. Extending this model
-to handle any finite number of choices is straightforward but complicates the
-presentation of the semantics. The accompanying implementation allows a list
-of choices.
+$\recv{x_1}{\ell_1}{x_2}{\ell_2}{e_1}{e_2}$ can receive a message on either
+channel $\ell_1$ or $\ell_2$. The contents of the message are bound to either
+$x_1$ or $x_2$ and the execution continues with either $e_1$ or $e_2$. If
+both choices are offered, the evaluation of the expression is permitted to
+choose which one to accept. Extending this model to handle any finite number
+of choices is straightforward but complicates the presentation of the
+semantics. The accompanying implementation allows a list of choices.
 
 \paragraph*{Processes.} A process computes forward and backwards sending and
 receiving messages. To enable distributed backtracking, each process maintain
@@ -87,12 +88,13 @@ to the times of the channels in its context and channel map.
 (\textit{values}) & v &::=& () \alt \ell \alt x \alt \lambda x.e \\
 (\textit{expressions}) & e &::=& () \alt \ell \alt x \alt \lambda x.e 
   \alt e_1e_2 \\
-  &&\alt& \send{e_1}{e_2} \alt \recv{x_1}{e_1}{x_2}{e_2} \\
+  &&\alt& \send{e_1}{e_2} \alt \recv{x_1}{e_1}{x_2}{e_2}{e'_1}{e'_2} \\
   &&\alt& \stable{e} \alt \stableu{e} \alt \backtrack{e} \alt \abacktrack \\
 \\
 (\textit{evaluation contexts}) & E &::=& \Box \alt E~e \alt v~E \alt 
   \send{E}{e} \alt \send{\ell}{E} \\
-  &&\alt& \recv{x_1}{E}{x_2}{e_2} \alt \recv{x_1}{\ell_1}{x_2}{E} \\
+  &&\alt& \recv{x_1}{E}{x_2}{e_2}{e'_1}{e'_2} \alt 
+      \recv{x_1}{\ell_1}{x_2}{E}{e'_1}{e'_2} \\
   &&\alt& \stable{E} \alt \stableu{E} \alt \backtrack{E}
 \end{array}\]
 
@@ -123,22 +125,22 @@ processes are as follows:
 \end{array}\]
 
 \item This next rule deals with the normal forward communication between two
-  processes. 
-
-says that if we have a channel $\ell$ with flag $F$ and two
-  processes who wish to communicate using this channel, the synchronization
-  happens as usual. After the communication, all three timestamps are updated
-  to some number that is greater than or equal to their maximum:
+  processes. If neither process is in the middle of a backtracking action
+  (i.e., no channel in either local map $\Xi_i$ is bound to the $B$
+  direction) then the usual synchronization happens. After the communication,
+  all three timestamps are updated to some number that is greater than or
+  equal to their maximum:
 \[\begin{array}{l}
   \parc{p}
   {\parc{\proc{n_1}{\Gamma_1}{\Xi_1}{E_1[\send{\ell}{v}]}{t_1}}
-        {\proc{n_2}{\Gamma_2}{\Xi_2}{E_2[\recv{x}{\ell}{x'}{\ell'}]}{t_2}}}
+        {\proc{n_2}{\Gamma_2}{\Xi_2}{E_2[\recv{x}{\ell}{x'}{\ell'}{e_1}{e_2}]}{t_2}}}
   \mapsto \\
   \parc{p}{\parc{\proc{n_1}{\Gamma_1}{\Xi_1'}{E_1[()]}{t}}
-    {\proc{n_2}{\Gamma_2}{\Xi_2'}{E_2[v]}{t}}}
+    {\proc{n_2}{\Gamma_2}{\Xi_2'}{E_2[e_1[v/x]]}{t}}}
 \end{array}\]
 The preconditions for this rule are: 
 \begin{itemize}
+\item no channel in either $\Xi_1$ or $\Xi_2$ is mapped to the $B$ direction;
 \item the sender's local channel map associates $\ell$ with
   $(\textbf{s},t_s,F,n_2)$, i.e., the map correctly identifies $n_2$ as the
   receiving process, and records that the channel direction is $F$, and has
@@ -195,49 +197,46 @@ region terminates with a value, we simply pop the context:
   &\mapsto& 
   \parc{p}{\proc{n}{\Gamma}{\underline{\Xi'}}{E'[v']}{t'}} 
 \end{array}\]
-where $\underline{\Xi'}$ denotes the channel map $\Xi$ with each entry that
+where $\underline{\Xi'}$ denotes the channel map $\Xi'$ with each entry that
 needs to be backtrack updated to have direction $B$. An entry $\ell \mapsto
 (sr,t,d,n)$ in $\Xi'$ needs to backtrack if its time component $t$ is less
 than the corresponding time $t'$ in the current map entry $\Xi(\ell) =
 (sr',t',d',n')$.
 
-\item The next rule deals with the situation in which one of the
-  processes has backtracked but its communication partner has not. In more
-  detail, if a channel $\ell$ is such that one of its attached processes
-  views it in the $F$ direction and the other attached process views it in
-  the $B$ direction, the former needs to backtrack to bring the channel to a
-  consistent state:
+\item The next rule deals with the situation in which one of the processes
+  has backtracked but its communication partner has not. In more detail, if a
+  channel $\ell$ is mapped to direction $B$ and time $t'$ in one of the local
+  maps (e.g., $\Xi_2$) and the other map indicates that the channel 
 \[\begin{array}{rcl}
 \parc{p}
   {\parc{\proc{n_1}{\Gamma_1}{\Xi_1}{e_1}{t_1}}
   {\proc{n_2}{\Gamma_2}{\Xi_2}{e_2}{t_2}}} &\mapsto& 
 \parc{p}
-  {\parc{\proc{n_1}{\Gamma_1}{\Xi_1}{e_1}{t_1}}
+  {\parc{\proc{n_1}{\Gamma_1}{\Xi_1}{\abacktrack}{t_1}}
   {\proc{n_2}{\Gamma_2}{\Xi_2}{\abacktrack}{t_2}}} 
 \end{array}\]
+if $(\ell,(t,d,n_1,n_2)) \in \Xi_1$ and $(\ell,(t',B,n_2,n_1)) \in \Xi_2$ in
+the initial configuration. If this condition is satisfied, process $n_1$ 
+starts an asynchronous backtrack operation. Note that if this backtrack operation 
+reaches the enclosing stable region and if the time associated with that region
+is still greater than $t'$ the same rule applies again to cause $n_1$ to continue
+backtracking. 
 
-if $(\ell,(t_c,B,n_1,n_2)) \in \Xi_1$ and $t_c < t_1$. This condition
-indicates that $n_2$ has backtracked to a time consistent with $t_c$ and
-hence that $n_1$ is still in the (inconsistent) future and hence should do
-the same. We achieve this by executing $\abacktrack$ which moves to the most
-recent saved context and attempts to re-execute the communication.  If that
-fails, this same rule applies and we backtrack again.  There is a symmetric
-rule for receivers.
-
-Eventually, the process backtracks to a time $t_1$ such that $t_c \geq t_1$,
-at which we can revert the channel to the flag $F$:
-\[\begin{array}{l}
-  \parc{p}{\proc{n_1}{\Gamma}{\Xi_1}{E[\send{\ell}{v}]}{t_1}} \mapsto \\
-  \parc{p}{\proc{n_1}{\Gamma}{\Xi_2}{E[\send{\ell}{v}]}{t_1}} 
+Eventually, both processes agree on the time associated with channel $\ell$
+which indicates that the backtracking process is complete and that the
+channel can be used for normal communication. This is achieved by simply
+changing the directions associated with the channel to $F$:
+\[\begin{array}{rcl}
+\parc{p}
+  {\parc{\proc{n_1}{\Gamma_1}{\Xi_1}{e_1}{t_1}}
+  {\proc{n_2}{\Gamma_2}{\Xi_2}{e_2}{t_2}}} &\mapsto& 
+\parc{p}
+  {\parc{\proc{n_1}{\Gamma_1}{\Xi'_1}{\abacktrack}{t_1}}
+  {\proc{n_2}{\Gamma_2}{\Xi'_2}{\abacktrack}{t_2}}} 
 \end{array}\]
-if $(\ell,(t_c,B,n_1,n_2)) \in \Xi_1$ and $t_c \geq t_1$ and channel $\ell$'s
-information in $\Xi_2$ is updated to $(t_c,F,n_1,n_2)$.
-
-Fold this rule in the communication rule: add side conditions to
-communication rule if channels are B and channel time is greater than of
-equal to process time; in that case we do communication and update channels
-to have flag F.
-
+if $(\ell,(t,d,n_1,n_2)) \in \Xi_1$ and $(\ell,(t,B,n_2,n_1)) \in \Xi_2$ in 
+the initial configuration. The resulting configuration differs in that the 
+channel maps $\Xi'_1$ and $\Xi'_2$ map $\ell$ to the direction $F$. 
 \end{itemize}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
