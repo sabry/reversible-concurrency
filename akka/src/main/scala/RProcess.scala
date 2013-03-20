@@ -1,4 +1,9 @@
 
+package reversibleconcurrency
+
+import akka.actor.{ ActorRef }
+import scala.collection.mutable.HashSet
+
 trait TimeDirection
 case object TForward extends TimeDirection
 case object TBackward extends TimeDirection
@@ -17,9 +22,9 @@ case class ChannelView(raw: Channel, role: MessageDirection) {
 case class Message(raw: Any, time: Int)
 
 class ChannelMap {
-  var raw = new Set[ChannelView]
+  var raw = new HashSet[ChannelView]
 }
 
-case class Frame[Input,Output](time: Int, channelMap: ChannelMap, context: FooContext[Input,Output], value: Input) 
+//case class Frame[Input,Output](time: Int, channelMap: ChannelMap, context: FooContext[Input,Output], value: Input) 
 
-case class FooContext[Input,Output]
+//case class FooContext[Input,Output]

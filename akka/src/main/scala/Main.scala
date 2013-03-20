@@ -12,7 +12,9 @@ object Main {
   def main(args: Array[String]): Unit = {
 
     // continuations stuff
-    ContinuationTest.go()
+    import ContinuationTest._
+    suspendThenResume()
+    beInteresting()
 
     // actor stuff
     val system = ActorSystem()
@@ -47,4 +49,43 @@ object ContinuationTest {
     println(x)
   }  
 
+  def suspendThenResume() {
+
+    var saved: Option[Unit=>Unit] = None
+    reset {
+      shift { k: (Unit=>Unit) =>
+        saved = Some(k)
+      }
+      println("Found 120 yet another way.")
+    }
+
+    saved.get()
+
+  }
+
+  var cont: Option[Unit=>Unit] = None
+
+  def suspend: Unit @ cpsParam[Unit,Unit] = {
+    shift { k: (Unit=>Unit) =>
+      cont = Some(k)
+    }
+  }
+
+  def resume {
+    cont.get.apply()
+  }
+
+  def beInteresting() = {
+    reset {
+      println("1")
+      suspend
+      println("2")
+    }
+    resume
+    resume
+  }
+
 }
+
+
+
