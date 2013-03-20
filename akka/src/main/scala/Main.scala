@@ -4,11 +4,17 @@
 package renamethispackage
 
 import akka.actor.{ ActorSystem, Actor, Props }
+import scala.util.continuations._
 
 case object DoSomething
 
 object Main {
   def main(args: Array[String]): Unit = {
+
+    // continuations stuff
+    ContinuationTest.go()
+
+    // actor stuff
     val system = ActorSystem()
     system.actorOf(Props[PointlessActor]) ! DoSomething
   }
@@ -27,3 +33,18 @@ class PointlessActor extends Actor {
 
 }
 
+// test delimited continuations plugin
+object ContinuationTest {
+
+  def go() {
+
+    val x = reset {
+      shift { k: (Int => Int) =>
+        k(24)
+      } * 5
+    }
+
+    println(x)
+  }  
+
+}
