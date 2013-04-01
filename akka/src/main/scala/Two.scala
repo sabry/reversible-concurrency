@@ -69,7 +69,7 @@ object Functions {
           k.apply(msg)
         case m @ Message(msg, chanId) =>
           // hack: send back to self 
-          //context.queue ! m
+          context.queue ! m
       }
     }   
   }
