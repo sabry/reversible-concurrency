@@ -15,6 +15,7 @@ libraryDependencies ++= Seq(
   "org.scala-stm"           %%  "scala-stm" % "0.7",
   "com.typesafe.akka"       %%  "akka-actor"    % "2.1.0",
   "com.typesafe.akka"       %%  "akka-agent"    % "2.1.0",
+  "org.scala-stm"           %%  "scala-stm"     % "0.7",
   "com.typesafe.akka"       %%  "akka-slf4j"    % "2.1.0",
   "ch.qos.logback" % "logback-classic" % "1.0.9"
 )
