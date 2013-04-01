@@ -12,8 +12,8 @@ object Main {
   def main(args: Array[String]): Unit = {
 
     // Actual reversible concurrency trigger
-    import reversibleconcurrency._
-    TestSystem.test
+//    import reversibleconcurrency._
+//    PactorSystem.work
 
     // continuations stuff
     import ContinuationTest._
