@@ -2,11 +2,12 @@
 package reversibleconcurrency4
 
 import akka.actor.{ ActorRef, Actor, ActorSystem, Props }
-import scala.collection.mutable.HashSet
-import scala.collection.mutable.HashMap
+//import scala.collection.mutable.HashSet
+//import scala.collection.mutable.HashMap
 import scala.util.continuations._
 import scala.concurrent.stm._
 import scala.concurrent.Promise
+import scala.util.DynamicVariable
 
 // Four.scala : 
 
@@ -58,13 +59,20 @@ object Functions {
   // import!)
   import TestSystem.system._
 
-  type BT = Unit => Unit
+  type BT = Unit=>Unit
 
-  def stable[In, Out](work: (In,BT)=>Out, input: In)(implicit context: ReversibleContext): Unit @cpsParam[Unit,Out] = {
+  // Directly use dynamic scope to make the backtrack function always
+  // work correctly.
+  val btK = new DynamicVariable[BT]( Unit => println("no backtrack defined yet"))
+  def backtrack = btK.value()
+  
+  def stable[In, Out](work: In=>Out, input: In)(implicit context: ReversibleContext): Unit @cpsParam[Unit,Out] = {
 
     // Step 1: Take a snapshot of where we are now.
     shift { k: (Unit=>Unit) => 
-      work(input, k)
+      btK.withValue(k) {
+        work(input)
+      }
     }
 
   }
@@ -172,7 +180,7 @@ object TestSystem {
 
         println("lets try some backtracking, no message passing yet")
         var found = false
-        def myWork(input: Int, backtrack: BT) { 
+        def myWork(input: Int) { 
           val n = scala.util.Random.nextInt(input)
           println("n = " + n)
           if(n == 0) {
@@ -180,7 +188,7 @@ object TestSystem {
             found = true
           } else {
             println("nozero, backtracking")            
-            backtrack()
+            backtrack
           }
         }        
         while(!found) {
