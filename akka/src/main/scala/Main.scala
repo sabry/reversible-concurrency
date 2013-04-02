@@ -12,7 +12,7 @@ object Main {
   def main(args: Array[String]): Unit = {
 
     // Actual reversible concurrency trigger
-    import reversibleconcurrency3._
+    import reversibleconcurrency4._
     TestSystem.test
 
     // continuations stuff
