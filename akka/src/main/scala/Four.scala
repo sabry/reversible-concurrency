@@ -2,8 +2,6 @@
 package reversibleconcurrency4
 
 import akka.actor.{ ActorRef, Actor, ActorSystem, Props }
-//import scala.collection.mutable.HashSet
-//import scala.collection.mutable.HashMap
 import scala.util.continuations._
 import scala.concurrent.stm._
 import scala.concurrent.Promise
@@ -60,22 +58,30 @@ object Functions {
   import TestSystem.system._
 
   type BT = Unit=>Unit
-
-  // Directly use dynamic scope to make the backtrack function always
-  // work correctly.
-  val btK = new DynamicVariable[BT]( Unit => println("no backtrack defined yet"))
-  def backtrack = btK.value()
   
-  def stable[In, Out](work: In=>Out, input: In)(implicit context: ReversibleContext): Unit @cpsParam[Unit,Out] = {
+  def stable[In, Out](work: (In=>Any,In)=>Out): (In, In=>Any, ReversibleContext)=>Out @cpsParam[Out,Unit] = {
+
+    (input: In, backtrack: (In=>Any), context: ReversibleContext) => {
+      shift { k: (Out=>Any) =>
+        val bt: (In=>Any) = (input: In) => { k(work(bt, input)) }
+        work(bt,input)
+      }
+    }: Out @cpsParam[Out,Unit]
+    
+  }
+    
+    
+
+//  def stable[In, Out](work: In=>Out, input: In)(implicit context: ReversibleContext): Unit @cpsParam[Unit,Out] = {
 
     // Step 1: Take a snapshot of where we are now.
-    shift { k: (Unit=>Unit) => 
-      btK.withValue(k) {
-        work(input)
-      }
-    }
+//    shift { k: (Unit=>Unit) => 
+  //    context.btK.withValue(k) {
+    //    work(input)
+   //   }
+   // }
 
-  }
+  //}
     
   def send[T](chan: Channel[T], msg: T)(implicit context: ReversibleContext): Unit @cpsParam[Unit,Unit] = {
     chan.receiver.future.map { 
@@ -108,6 +114,7 @@ object Functions {
 }
 
 trait ReversibleContext {
+  // timestamp stuff
   var sendClause: Ref.View[PartialFunction[Any,Unit]]
   var receiveClause: Ref.View[PartialFunction[Any,Unit]]
   val selfRef: ActorRef
@@ -177,7 +184,7 @@ object TestSystem {
         channel.register(ChannelSender)
         println("sender registered, about to send")
         send(channel, 120)
-
+/*
         println("lets try some backtracking, no message passing yet")
         var found = false
         def myWork(input: Int) { 
@@ -194,6 +201,7 @@ object TestSystem {
         while(!found) {
           stable(myWork _ , 5)
         }
+        */
       }
     }
 
