@@ -63,7 +63,7 @@ object Functions {
 
     (input: In, backtrack: (In=>Any), context: ReversibleContext) => {
       shift { k: (Out=>Any) =>
-        val bt: (In=>Any) = (input: In) => { k(work(bt, input)) }
+        def bt: (In=>Any) = (input: In) => { k(work(bt, input)) }
         work(bt,input)
       }
     }: Out @cpsParam[Out,Unit]
