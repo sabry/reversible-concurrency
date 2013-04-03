@@ -50,39 +50,54 @@ class ProcessActor(task: ReversibleContext => Unit) extends Actor {
   
 }
 
+//case class WorkUnit[In,Out](fun: (In=>Any)=>In=>Out)  {
+//  def apply(input: In, implicit backtrack: In=>Any): Out = {
+//    fun(backtrack)(input)
+//  }
+//}
+
+//case class BackTrack[In](fun: (In,(In=>Any))=>Out) {
+//  def apply(input: In, implicit backtrack: In=>Any) {
+    
+case class StableTask[In,Out](fun: (In,ReversibleContext) => Out @cpsParam[Out,Unit]) {
+  def apply(input: In)(implicit context: ReversibleContext): Out @cpsParam[Out,Unit] = {
+    fun(input, context)
+  }
+}
+
+case class Backtrack[In](fun: (In,Backtrack[In])=>Any) {
+  def apply(input: In): Any = {
+    fun(input,this)
+  }
+}
+
+
 object Functions {
+
+//  implicit def bt2bt[In,Out](fun: (In=>Any)=>In=>Out): WorkUnit[In,Out] = {
+//    WorkUnit(fun)
+//  }
 
   // This is a functor parameterized by the system, but I need to
   // figure out the appropriate syntax. (aka I don't want this
   // import!)
   import TestSystem.system._
 
-  type BT = Unit=>Unit
-  
-  def stable[In, Out](work: (In=>Any,In)=>Out): (In, In=>Any, ReversibleContext)=>Out @cpsParam[Out,Unit] = {
+  def stable[In, Out](work: (In,Backtrack[In]) => Out): StableTask[In,Out] = {
 
-    (input: In, backtrack: (In=>Any), context: ReversibleContext) => {
-      shift { k: (Out=>Any) =>
-        def bt: (In=>Any) = (input: In) => { k(work(bt, input)) }
-        work(bt,input)
-      }
-    }: Out @cpsParam[Out,Unit]
+    new StableTask[In,Out](
+      (input: In, context: ReversibleContext) => {
+        shift { k: (Out=>Any) =>          
+          def bt = new Backtrack[In]( (input: In, bt: Backtrack[In]) =>
+            k(work(input,bt))
+          )
+          work(input,bt)
+        }
+      }: Out @cpsParam[Out,Unit]
+    )
     
   }
-    
-    
-
-//  def stable[In, Out](work: In=>Out, input: In)(implicit context: ReversibleContext): Unit @cpsParam[Unit,Out] = {
-
-    // Step 1: Take a snapshot of where we are now.
-//    shift { k: (Unit=>Unit) => 
-  //    context.btK.withValue(k) {
-    //    work(input)
-   //   }
-   // }
-
-  //}
-    
+        
   def send[T](chan: Channel[T], msg: T)(implicit context: ReversibleContext): Unit @cpsParam[Unit,Unit] = {
     chan.receiver.future.map { 
       ref => ref ! Message(msg, chan.id)
@@ -184,6 +199,19 @@ object TestSystem {
         channel.register(ChannelSender)
         println("sender registered, about to send")
         send(channel, 120)
+
+        println("Simple backtrack test:")
+        val work = stable[Int,Unit] { (input: Int, backtrack: Backtrack[Int]) =>
+          println("Input: " + input)
+          if(input == 0) {
+            println("Found zero")
+          } else {
+            backtrack(input-1)
+          }
+        }
+
+        work(5)
+
 /*
         println("lets try some backtracking, no message passing yet")
         var found = false
