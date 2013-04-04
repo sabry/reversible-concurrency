@@ -74,10 +74,6 @@ case class Backtrack[In](fun: (In,Backtrack[In])=>Any) {
 
 object Functions {
 
-//  implicit def bt2bt[In,Out](fun: (In=>Any)=>In=>Out): WorkUnit[In,Out] = {
-//    WorkUnit(fun)
-//  }
-
   // This is a functor parameterized by the system, but I need to
   // figure out the appropriate syntax. (aka I don't want this
   // import!)
@@ -88,7 +84,7 @@ object Functions {
     new StableTask[In,Out](
       (input: In, context: ReversibleContext) => {
         shift { k: (Out=>Any) =>          
-          def bt = new Backtrack[In]( (input: In, bt: Backtrack[In]) =>
+          val bt = new Backtrack[In]( (input: In, bt: Backtrack[In]) =>
             k(work(input,bt))
           )
           work(input,bt)
